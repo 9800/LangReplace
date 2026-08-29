@@ -5,9 +5,9 @@ const HWND = windows.HWND;
 const HANDLE = windows.HANDLE;
 const UINT = windows.UINT;
 const DWORD = windows.DWORD;
-const LPCWSTR = windows.LPCWSTR;
 const HGLOBAL = windows.HGLOBAL;
 const SIZE_T = windows.SIZE_T;
+const BOOL = windows.BOOL;
 
 extern "user32" fn OpenClipboard(hWndNewOwner: ?HWND) callconv(windows.WINAPI) BOOL;
 extern "user32" fn CloseClipboard() callconv(windows.WINAPI) BOOL;
@@ -19,12 +19,11 @@ extern "kernel32" fn GlobalAlloc(uFlags: UINT, dwBytes: SIZE_T) callconv(windows
 extern "kernel32" fn GlobalLock(hMem: HGLOBAL) callconv(windows.WINAPI) ?*anyopaque;
 extern "kernel32" fn GlobalUnlock(hMem: HGLOBAL) callconv(windows.WINAPI) BOOL;
 
-const BOOL = windows.BOOL;
-const GMEM_MOVEABLE = 0x0002;
-const CF_UNICODETEXT = 13;
+const GMEM_MOVEABLE: UINT = 0x0002;
+const CF_UNICODETEXT: UINT = 13;
 
 pub fn getClipboardText(allocator: std.mem.Allocator) !?[]u8 {
-    if (!OpenClipboard(null)) {
+    if (OpenClipboard(null) == 0) {
         return null;
     }
     defer _ = CloseClipboard();
@@ -39,15 +38,15 @@ pub fn getClipboardText(allocator: std.mem.Allocator) !?[]u8 {
         len += 1;
     }
 
-    const utf8Len = std.unicode.utf16LeToUtf8Alloc(allocator, wideText[0..len]) catch return null;
-    return utf8Len;
+    const utf8Text = std.unicode.utf16LeToUtf8Alloc(allocator, wideText[0..len]) catch return null;
+    return utf8Text;
 }
 
 pub fn setClipboardText(text: []const u8) bool {
     const wideText = std.unicode.utf8ToUtf16LeAlloc(std.heap.page_allocator, text) catch return false;
     defer std.heap.page_allocator.free(wideText);
 
-    if (!OpenClipboard(null)) {
+    if (OpenClipboard(null) == 0) {
         return false;
     }
     defer _ = CloseClipboard();
