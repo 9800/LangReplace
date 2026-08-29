@@ -111,8 +111,10 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
 
     switch (id) {
         .search_google => {
+            keyboard.selectCurrentLine();
             const text = copySelection(allocator) orelse return;
             defer allocator.free(text);
+            keyboard.collapseSelection();
             _ = search.openGoogleSearch(text, allocator);
             return;
         },
@@ -127,6 +129,9 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
         .convert_case => .force_persian_case,
         else => unreachable,
     };
+
+    // ✅ انتخاب خودکار خط جاری — بدون نیاز به انتخاب دستی
+    keyboard.selectCurrentLine();
 
     const text = copySelection(allocator) orelse return;
     defer allocator.free(text);
