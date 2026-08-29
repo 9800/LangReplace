@@ -1,7 +1,6 @@
 const std = @import("std");
 const windows = std.os.windows;
 
-// ✅ extern باید در سطح ماژول باشه، نه داخل تابع
 extern "shell32" fn ShellExecuteA(
     hwnd: ?windows.HWND,
     lpOperation: windows.LPCSTR,
@@ -9,14 +8,17 @@ extern "shell32" fn ShellExecuteA(
     lpParameters: windows.LPCSTR,
     lpDirectory: windows.LPCSTR,
     nShowCmd: i32,
-) callconv(windows.WINAPI) windows.HINSTANCE;
+) callconv(windows.WINAPI) usize;
 
-pub fn getGoogleSearchUrl(text: []const u8) []const u8 {
-    _ = text;
-    return "https://www.google.com/search?q=";
+pub fn openUrl(url: []const u8, allocator: std.mem.Allocator) bool {
+    const z = allocator.dupeZ(u8, url) catch return false;
+    defer allocator.free(z);
+    const result = ShellExecuteA(null, "open", z, null, null, 1);
+    return result > 32;
 }
 
-pub fn openUrl(url: []const u8) bool {
-    const result = ShellExecuteA(null, "open", url, null, null, 1);
-    return @intFromPtr(result) > 32;
+pub fn openGoogleSearch(text: []const u8, allocator: std.mem.Allocator) bool {
+    const url = std.fmt.allocPrint(allocator, "https://www.google.com/search?q={s}", .{text}) catch return false;
+    defer allocator.free(url);
+    return openUrl(url, allocator);
 }
