@@ -5,142 +5,104 @@ pub const KeyboardLayout = enum {
     english,
 };
 
-const CharMap = struct {
-    from: u8,
-    to: u8,
+const Pair = struct {
+    fa: u21,
+    en: u21,
 };
 
-// نقشه تبدیل فارسی به انگلیسی (چیدمان استاندارد)
-const fa_to_en_map = [_]CharMap{
-    .{ .from = 'ض', .to = 'q' },
-    .{ .from = 'ص', .to = 'w' },
-    .{ .from = 'ث', .to = 'e' },
-    .{ .from = 'ق', .to = 'r' },
-    .{ .from = 'ف', .to = 't' },
-    .{ .from = 'غ', .to = 'y' },
-    .{ .from = 'ع', .to = 'u' },
-    .{ .from = 'ه', .to = 'i' },
-    .{ .from = 'خ', .to = 'o' },
-    .{ .from = 'ح', .to = 'p' },
-    .{ .from = 'ج', .to = '[' },
-    .{ .from = 'چ', .to = ']' },
-    .{ .from = 'پ', .to = '\\' },
-    .{ .from = 'ش', .to = 'a' },
-    .{ .from = 'س', .to = 's' },
-    .{ .from = 'ی', .to = 'd' },
-    .{ .from = 'ب', .to = 'f' },
-    .{ .from = 'ل', .to = 'g' },
-    .{ .from = 'ا', .to = 'h' },
-    .{ .from = 'ت', .to = 'j' },
-    .{ .from = 'ن', .to = 'k' },
-    .{ .from = 'م', .to = 'l' },
-    .{ .from = 'ک', .to = ';' },
-    .{ .from = 'گ', .to = '\'' },
-    .{ .from = 'ظ', .to = 'z' },
-    .{ .from = 'ط', .to = 'x' },
-    .{ .from = 'ز', .to = 'c' },
-    .{ .from = 'ر', .to = 'v' },
-    .{ .from = 'ذ', .to = 'b' },
-    .{ .from = 'د', .to = 'n' },
-    .{ .from = 'ئ', .to = 'm' },
-    .{ .from = 'و', .to = ',' },
-    .{ .from = '.', .to = '.' },
-    .{ .from = '/', .to = '/' },
+// نقشه چیدمان استاندارد فارسی ↔ انگلیسی (بر اساس کدپوینت Unicode)
+const pairs = [_]Pair{
+    .{ .fa = 0x0636, .en = 'q' }, // ض
+    .{ .fa = 0x0635, .en = 'w' }, // ص
+    .{ .fa = 0x062B, .en = 'e' }, // ث
+    .{ .fa = 0x0642, .en = 'r' }, // ق
+    .{ .fa = 0x0641, .en = 't' }, // ف
+    .{ .fa = 0x063A, .en = 'y' }, // غ
+    .{ .fa = 0x0639, .en = 'u' }, // ع
+    .{ .fa = 0x0647, .en = 'i' }, // ه
+    .{ .fa = 0x062E, .en = 'o' }, // خ
+    .{ .fa = 0x062D, .en = 'p' }, // ح
+    .{ .fa = 0x062C, .en = '[' }, // ج
+    .{ .fa = 0x0686, .en = ']' }, // چ
+    .{ .fa = 0x067E, .en = '\\' }, // پ
+    .{ .fa = 0x0634, .en = 'a' }, // ش
+    .{ .fa = 0x0633, .en = 's' }, // س
+    .{ .fa = 0x06CC, .en = 'd' }, // ی
+    .{ .fa = 0x0628, .en = 'f' }, // ب
+    .{ .fa = 0x0644, .en = 'g' }, // ل
+    .{ .fa = 0x0627, .en = 'h' }, // ا
+    .{ .fa = 0x062A, .en = 'j' }, // ت
+    .{ .fa = 0x0646, .en = 'k' }, // ن
+    .{ .fa = 0x0645, .en = 'l' }, // م
+    .{ .fa = 0x06A9, .en = ';' }, // ک
+    .{ .fa = 0x06AF, .en = '\'' }, // گ
+    .{ .fa = 0x0638, .en = 'z' }, // ظ
+    .{ .fa = 0x0637, .en = 'x' }, // ط
+    .{ .fa = 0x0632, .en = 'c' }, // ز
+    .{ .fa = 0x0631, .en = 'v' }, // ر
+    .{ .fa = 0x0630, .en = 'b' }, // ذ
+    .{ .fa = 0x062F, .en = 'n' }, // د
+    .{ .fa = 0x0626, .en = 'm' }, // ئ
+    .{ .fa = 0x0648, .en = ',' }, // و
 };
 
-const en_to_fa_map = [_]CharMap{
-    .{ .from = 'q', .to = 'ض' },
-    .{ .from = 'w', .to = 'ص' },
-    .{ .from = 'e', .to = 'ث' },
-    .{ .from = 'r', .to = 'ق' },
-    .{ .from = 't', .to = 'ف' },
-    .{ .from = 'y', .to = 'غ' },
-    .{ .from = 'u', .to = 'ع' },
-    .{ .from = 'i', .to = 'ه' },
-    .{ .from = 'o', .to = 'خ' },
-    .{ .from = 'p', .to = 'ح' },
-    .{ .from = '[', .to = 'ج' },
-    .{ .from = ']', .to = 'چ' },
-    .{ .from = '\\', .to = 'پ' },
-    .{ .from = 'a', .to = 'ش' },
-    .{ .from = 's', .to = 'س' },
-    .{ .from = 'd', .to = 'ی' },
-    .{ .from = 'f', .to = 'ب' },
-    .{ .from = 'g', .to = 'ل' },
-    .{ .from = 'h', .to = 'ا' },
-    .{ .from = 'j', .to = 'ت' },
-    .{ .from = 'k', .to = 'ن' },
-    .{ .from = 'l', .to = 'م' },
-    .{ .from = ';', .to = 'ک' },
-    .{ .from = '\'', .to = 'گ' },
-    .{ .from = 'z', .to = 'ظ' },
-    .{ .from = 'x', .to = 'ط' },
-    .{ .from = 'c', .to = 'ز' },
-    .{ .from = 'v', .to = 'ر' },
-    .{ .from = 'b', .to = 'ذ' },
-    .{ .from = 'n', .to = 'د' },
-    .{ .from = 'm', .to = 'ئ' },
-    .{ .from = ',', .to = 'و' },
-};
+fn lookup(fa_to_en: bool, cp: u21) ?u21 {
+    for (pairs) |p| {
+        if (fa_to_en) {
+            if (p.fa == cp) return p.en;
+        } else {
+            if (p.en == cp) return p.fa;
+        }
+    }
+    return null;
+}
+
+fn appendCodepoint(out: *std.ArrayList(u8), cp: u21) !void {
+    var buf: [4]u8 = undefined;
+    const n = try std.unicode.utf8Encode(cp, &buf);
+    try out.appendSlice(buf[0..n]);
+}
 
 pub fn convertText(text: []const u8, from: KeyboardLayout, to: KeyboardLayout, allocator: std.mem.Allocator) ![]u8 {
-    var result = std.ArrayList(u8).init(allocator);
-    defer result.deinit();
+    _ = to;
+    const fa_to_en = (from == .persian);
 
-    const map = if (from == .persian and to == .english) fa_to_en_map else en_to_fa_map;
+    var out = std.ArrayList(u8).init(allocator);
+    errdefer out.deinit();
 
-    var i: usize = 0;
-    while (i < text.len) {
-        const byte = text[i];
-        var found = false;
-
-        for (map) |entry| {
-            if (entry.from == byte) {
-                try result.append(entry.to);
-                found = true;
-                break;
-            }
+    var view = try std.unicode.Utf8View.init(text);
+    var it = view.iterator();
+    while (it.nextCodepoint()) |cp| {
+        if (lookup(fa_to_en, cp)) |mapped| {
+            try appendCodepoint(&out, mapped);
+        } else {
+            try appendCodepoint(&out, cp);
         }
-
-        if (!found) {
-            try result.append(byte);
-        }
-
-        i += 1;
     }
 
-    return try result.toOwnedSlice();
+    return out.toOwnedSlice();
 }
 
 pub fn convertTextPreserveCase(text: []const u8, from: KeyboardLayout, to: KeyboardLayout, allocator: std.mem.Allocator) ![]u8 {
-    var result = std.ArrayList(u8).init(allocator);
-    defer result.deinit();
+    _ = to;
+    const fa_to_en = (from == .persian);
 
-    const map = if (from == .persian and to == .english) fa_to_en_map else en_to_fa_map;
+    var out = std.ArrayList(u8).init(allocator);
+    errdefer out.deinit();
 
-    var i: usize = 0;
-    while (i < text.len) {
-        const byte = text[i];
-        var found = false;
+    var view = try std.unicode.Utf8View.init(text);
+    var it = view.iterator();
+    while (it.nextCodepoint()) |cp| {
+        const is_upper = (cp >= 'A' and cp <= 'Z');
+        const base = if (is_upper) cp + 32 else cp;
 
-        for (map) |entry| {
-            if (entry.from == byte or std.ascii.toLower(entry.from) == std.ascii.toLower(byte)) {
-                var converted = entry.to;
-                if (std.ascii.isUpper(byte)) {
-                    converted = std.ascii.toUpper(converted);
-                }
-                try result.append(converted);
-                found = true;
-                break;
-            }
+        if (lookup(fa_to_en, base)) |mapped0| {
+            const mapped = if (is_upper and mapped0 >= 'a' and mapped0 <= 'z') mapped0 - 32 else mapped0;
+            try appendCodepoint(&out, mapped);
+        } else {
+            try appendCodepoint(&out, cp);
         }
-
-        if (!found) {
-            try result.append(byte);
-        }
-
-        i += 1;
     }
 
-    return try result.toOwnedSlice();
+    return out.toOwnedSlice();
 }
