@@ -6,15 +6,16 @@ const DWORD = windows.DWORD;
 
 const INPUT_KEYBOARD: DWORD = 1;
 const KEYEVENTF_KEYUP: DWORD = 0x0002;
+const KEYEVENTF_UNICODE: DWORD = 0x0004;
 
 const VK_SHIFT: u16 = 0x10;
 const VK_CONTROL: u16 = 0x11;
 const VK_HOME: u16 = 0x24;
 const VK_END: u16 = 0x23;
 const VK_RIGHT: u16 = 0x27;
+const VK_DELETE: u16 = 0x2E;
 
 pub const VK_C: u16 = 0x43;
-pub const VK_V: u16 = 0x56;
 
 const MOUSEINPUT = extern struct {
     dx: i32,
@@ -65,6 +66,19 @@ fn keyInput(vk: u16, flags: DWORD) INPUT {
     };
 }
 
+fn unicodeInput(scan: u16, flags: DWORD) INPUT {
+    return INPUT{
+        .type = INPUT_KEYBOARD,
+        .u = .{ .ki = .{
+            .wVk = 0,
+            .wScan = scan,
+            .dwFlags = flags | KEYEVENTF_UNICODE,
+            .time = 0,
+            .dwExtraInfo = 0,
+        } },
+    };
+}
+
 pub fn simulateCtrlCombo(vk: u16) void {
     var inputs: [4]INPUT = .{
         keyInput(VK_CONTROL, 0),
@@ -75,7 +89,6 @@ pub fn simulateCtrlCombo(vk: u16) void {
     _ = SendInput(4, &inputs[0], @sizeOf(INPUT));
 }
 
-// ✅ انتخاب خودکار خط جاری (بدون نیاز به انتخاب دستی)
 pub fn selectCurrentLine() void {
     var inputs: [6]INPUT = .{
         keyInput(VK_HOME, 0),
@@ -88,11 +101,45 @@ pub fn selectCurrentLine() void {
     _ = SendInput(6, &inputs[0], @sizeOf(INPUT));
 }
 
-// جمع‌کردن selection بعد از کپی (برای جستجو)
 pub fn collapseSelection() void {
     var inputs: [2]INPUT = .{
         keyInput(VK_RIGHT, 0),
         keyInput(VK_RIGHT, KEYEVENTF_KEYUP),
     };
     _ = SendInput(2, &inputs[0], @sizeOf(INPUT));
+}
+
+// ✅ برو به اول خط جاری
+pub fn moveHome() void {
+    var inputs: [2]INPUT = .{
+        keyInput(VK_HOME, 0),
+        keyInput(VK_HOME, KEYEVENTF_KEYUP),
+    };
+    _ = SendInput(2, &inputs[0], @sizeOf(INPUT));
+}
+
+// ✅ حذف n کاراکتر از اول خط
+pub fn deleteChars(n: usize) void {
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        var inputs: [2]INPUT = .{
+            keyInput(VK_DELETE, 0),
+            keyInput(VK_DELETE, KEYEVENTF_KEYUP),
+        };
+        _ = SendInput(2, &inputs[0], @sizeOf(INPUT));
+    }
+}
+
+// ✅ تایپ متن یونیکد (فارسی/انگلیسی) کاراکتر به کاراکتر
+pub fn typeUnicodeText(text: []const u8, allocator: std.mem.Allocator) void {
+    const units = std.unicode.utf8ToUtf16LeAlloc(allocator, text) catch return;
+    defer allocator.free(units);
+
+    for (units) |u| {
+        var inputs: [2]INPUT = .{
+            unicodeInput(u, 0),
+            unicodeInput(u, KEYEVENTF_KEYUP),
+        };
+        _ = SendInput(2, &inputs[0], @sizeOf(INPUT));
+    }
 }
