@@ -106,6 +106,12 @@ fn copySelection(allocator: std.mem.Allocator) ?[]u8 {
     return text;
 }
 
+fn utf16Len(text: []const u8, allocator: std.mem.Allocator) usize {
+    const units = std.unicode.utf8ToUtf16LeAlloc(allocator, text) catch return 0;
+    defer allocator.free(units);
+    return units.len;
+}
+
 fn handleHotkey(id: hotkey.HotkeyId) void {
     const allocator = std.heap.page_allocator;
 
@@ -131,11 +137,10 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
         else => unreachable,
     };
 
-    // ۱) انتخاب خودکار خط جاری
+    // ۱) انتخاب خودکار خط جاری + کپی
     keyboard.selectCurrentLine();
     std.time.sleep(30 * std.time.ns_per_ms);
 
-    // ۲) کپی خط انتخاب‌شده
     const text = copySelection(allocator) orelse {
         keyboard.collapseSelection();
         return;
@@ -146,7 +151,7 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
         return;
     }
 
-    // ۳) تبدیل
+    // ۲) تبدیل
     const converted = switch (mode) {
         .auto_detect => blk: {
             const layout = converter.detectLayout(text);
@@ -158,13 +163,14 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
     };
     defer allocator.free(converted);
 
-    _ = clipboard.setClipboardText(converted);
-    std.time.sleep(50 * std.time.ns_per_ms);
+    // ۳) ✅ جایگزینی قطعی: اول خط → حذف خط قبلی → تایپ متن جدید
+    const old_len = utf16Len(text, allocator);
 
-    // ۴) ✅ انتخاب دوباره خط + جایگزینی قطعی با Ctrl+V
-    keyboard.selectCurrentLine();
-    std.time.sleep(30 * std.time.ns_per_ms);
-    keyboard.simulateCtrlCombo(keyboard.VK_V);
+    keyboard.moveHome();
+    std.time.sleep(20 * std.time.ns_per_ms);
+    keyboard.deleteChars(old_len);
+    std.time.sleep(20 * std.time.ns_per_ms);
+    keyboard.typeUnicodeText(converted, allocator);
 }
 
 fn handleMenuCommand(cmd: usize, hWnd: HWND) void {
