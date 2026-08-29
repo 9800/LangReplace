@@ -3,18 +3,14 @@ const windows = std.os.windows;
 
 const HWND = windows.HWND;
 const UINT = windows.UINT;
-const WPARAM = windows.WPARAM;
-const LPARAM = windows.LPARAM;
-const LRESULT = windows.LRESULT;
-const DWORD = windows.DWORD;
+const BOOL = windows.BOOL;
 
 extern "user32" fn RegisterHotKey(hWnd: ?HWND, id: i32, fsModifiers: UINT, vk: UINT) callconv(windows.WINAPI) BOOL;
 extern "user32" fn UnregisterHotKey(hWnd: ?HWND, id: i32) callconv(windows.WINAPI) BOOL;
-extern "user32" fn PostQuitMessage(nExitCode: i32) callconv(windows.WINAPI) void;
 
-const BOOL = windows.BOOL;
-const MOD_CONTROL = 0x0002;
-const MOD_SHIFT = 0x0004;
+const MOD_CONTROL: UINT = 0x0002;
+const MOD_SHIFT: UINT = 0x0004;
+const MOD_NOREPEAT: UINT = 0x4000;
 
 pub const HotkeyId = enum(i32) {
     convert = 1,
@@ -26,12 +22,12 @@ pub const HotkeyId = enum(i32) {
 };
 
 pub fn registerHotkeys(hWnd: ?HWND) bool {
-    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.convert), 0, 0x79); // F10
-    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.convert_reverse), 0, 0x75); // F6
-    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.convert_case), MOD_SHIFT, 0x79); // Shift+F10
-    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.search_google), MOD_CONTROL, 0x47); // Ctrl+G
-    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.translate), MOD_CONTROL, 0x54); // Ctrl+T
-    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.qr_code), MOD_CONTROL, 0x4D); // Ctrl+M
+    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.convert), MOD_NOREPEAT, 0x79); // F10
+    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.convert_reverse), MOD_NOREPEAT, 0x75); // F6
+    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.convert_case), MOD_SHIFT | MOD_NOREPEAT, 0x79); // Shift+F10
+    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.search_google), MOD_CONTROL | MOD_NOREPEAT, 0x47); // Ctrl+G
+    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.translate), MOD_CONTROL | MOD_NOREPEAT, 0x54); // Ctrl+T
+    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.qr_code), MOD_CONTROL | MOD_NOREPEAT, 0x4D); // Ctrl+M
     return true;
 }
 
