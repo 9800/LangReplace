@@ -13,6 +13,7 @@ const WPARAM = windows.WPARAM;
 const LPARAM = windows.LPARAM;
 const LRESULT = windows.LRESULT;
 const HINSTANCE = windows.HINSTANCE;
+const HMODULE = windows.HMODULE;
 const DWORD = windows.DWORD;
 const BOOL = windows.BOOL;
 
@@ -131,8 +132,9 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
 }
 
 pub fn main() !void {
-    const hInstance = windows.kernel32.GetModuleHandleW(null);
-    g_hInstance = hInstance;
+    // ✅ رفع خطای HMODULE → HINSTANCE
+    const hModule: ?HMODULE = windows.kernel32.GetModuleHandleW(null);
+    g_hInstance = @as(?HINSTANCE, @ptrCast(hModule));
 
     const className = "LangReplaceWindow";
     
@@ -142,7 +144,7 @@ pub fn main() !void {
         .lpfnWndProc = windowProc,
         .cbClsExtra = 0,
         .cbWndExtra = 0,
-        .hInstance = hInstance,
+        .hInstance = g_hInstance,
         .hIcon = null,
         .hCursor = null,
         .hbrBackground = null,
@@ -164,7 +166,7 @@ pub fn main() !void {
         CW_USEDEFAULT,
         null,
         null,
-        hInstance,
+        g_hInstance,
         null,
     ) orelse return error.WindowCreationFailed;
 
