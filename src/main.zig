@@ -112,6 +112,7 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
     switch (id) {
         .search_google => {
             keyboard.selectCurrentLine();
+            std.time.sleep(30 * std.time.ns_per_ms);
             const text = copySelection(allocator) orelse return;
             defer allocator.free(text);
             keyboard.collapseSelection();
@@ -130,13 +131,22 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
         else => unreachable,
     };
 
-    // ✅ انتخاب خودکار خط جاری — بدون نیاز به انتخاب دستی
+    // ۱) انتخاب خودکار خط جاری
     keyboard.selectCurrentLine();
+    std.time.sleep(30 * std.time.ns_per_ms);
 
-    const text = copySelection(allocator) orelse return;
+    // ۲) کپی خط انتخاب‌شده
+    const text = copySelection(allocator) orelse {
+        keyboard.collapseSelection();
+        return;
+    };
     defer allocator.free(text);
-    if (text.len == 0) return;
+    if (text.len == 0) {
+        keyboard.collapseSelection();
+        return;
+    }
 
+    // ۳) تبدیل
     const converted = switch (mode) {
         .auto_detect => blk: {
             const layout = converter.detectLayout(text);
@@ -150,6 +160,10 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
 
     _ = clipboard.setClipboardText(converted);
     std.time.sleep(50 * std.time.ns_per_ms);
+
+    // ۴) ✅ انتخاب دوباره خط + جایگزینی قطعی با Ctrl+V
+    keyboard.selectCurrentLine();
+    std.time.sleep(30 * std.time.ns_per_ms);
     keyboard.simulateCtrlCombo(keyboard.VK_V);
 }
 
