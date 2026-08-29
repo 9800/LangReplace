@@ -3,10 +3,10 @@ const windows = std.os.windows;
 
 extern "shell32" fn ShellExecuteA(
     hwnd: ?windows.HWND,
-    lpOperation: windows.LPCSTR,
+    lpOperation: ?windows.LPCSTR,
     lpFile: windows.LPCSTR,
-    lpParameters: windows.LPCSTR,
-    lpDirectory: windows.LPCSTR,
+    lpParameters: ?windows.LPCSTR,   // ✅ nullable
+    lpDirectory: ?windows.LPCSTR,    // ✅ nullable
     nShowCmd: i32,
 ) callconv(windows.WINAPI) usize;
 
