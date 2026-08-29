@@ -6,6 +6,7 @@ const hotkey = @import("hotkey.zig");
 const clipboard = @import("clipboard.zig");
 const converter = @import("converter.zig");
 const search = @import("search.zig");
+const keyboard = @import("keyboard.zig");
 
 const HWND = windows.HWND;
 const UINT = windows.UINT;
@@ -16,7 +17,6 @@ const HINSTANCE = windows.HINSTANCE;
 const DWORD = windows.DWORD;
 const BOOL = windows.BOOL;
 
-// ✅ تعریف دستی POINT و MSG (در std.os.windows نیستن)
 const POINT = extern struct {
     x: i32,
     y: i32,
@@ -83,6 +83,71 @@ const CW_USEDEFAULT: i32 = @as(i32, @bitCast(@as(u32, 0x80000000)));
 var g_hInstance: ?HINSTANCE = null;
 var g_tray: ?tray.TrayManager = null;
 
+const ConvertMode = enum {
+    auto_detect,
+    force_english,
+    force_persian_case,
+};
+
+fn waitForClipboardChange(old_seq: DWORD) bool {
+    var i: u32 = 0;
+    while (i < 50) : (i += 1) {
+        if (clipboard.getSequence() != old_seq) return true;
+        std.time.sleep(10 * std.time.ns_per_ms);
+    }
+    return false;
+}
+
+fn copySelection(allocator: std.mem.Allocator) ?[]u8 {
+    const seq = clipboard.getSequence();
+    keyboard.simulateCtrlCombo(keyboard.VK_C);
+    if (!waitForClipboardChange(seq)) return null;
+    const text = clipboard.getClipboardText(allocator) catch return null;
+    return text;
+}
+
+fn handleHotkey(id: hotkey.HotkeyId) void {
+    const allocator = std.heap.page_allocator;
+
+    switch (id) {
+        .search_google => {
+            const text = copySelection(allocator) orelse return;
+            defer allocator.free(text);
+            _ = search.openGoogleSearch(text, allocator);
+            return;
+        },
+        .translate => return,
+        .qr_code => return,
+        else => {},
+    }
+
+    const mode: ConvertMode = switch (id) {
+        .convert => .auto_detect,
+        .convert_reverse => .force_english,
+        .convert_case => .force_persian_case,
+        else => unreachable,
+    };
+
+    const text = copySelection(allocator) orelse return;
+    defer allocator.free(text);
+    if (text.len == 0) return;
+
+    const converted = switch (mode) {
+        .auto_detect => blk: {
+            const layout = converter.detectLayout(text);
+            const target: converter.KeyboardLayout = if (layout == .persian) .english else .persian;
+            break :blk converter.convertText(text, layout, target, allocator) catch return;
+        },
+        .force_english => converter.convertText(text, .persian, .english, allocator) catch return,
+        .force_persian_case => converter.convertTextPreserveCase(text, .english, .persian, allocator) catch return,
+    };
+    defer allocator.free(converted);
+
+    _ = clipboard.setClipboardText(converted);
+    std.time.sleep(50 * std.time.ns_per_ms);
+    keyboard.simulateCtrlCombo(keyboard.VK_V);
+}
+
 fn handleMenuCommand(cmd: usize, hWnd: HWND) void {
     switch (cmd) {
         tray.MENU_ID_EXIT => {
@@ -125,38 +190,6 @@ fn windowProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(wi
             return 0;
         },
         else => return DefWindowProcW(hWnd, Msg, wParam, lParam),
-    }
-}
-
-fn handleHotkey(id: hotkey.HotkeyId) void {
-    const allocator = std.heap.page_allocator;
-
-    const text = clipboard.getClipboardText(allocator) catch return;
-    if (text) |t| {
-        defer allocator.free(t);
-
-        switch (id) {
-            .convert => {
-                const converted = converter.convertText(t, .english, .persian, allocator) catch return;
-                defer allocator.free(converted);
-                _ = clipboard.setClipboardText(converted);
-            },
-            .convert_reverse => {
-                const converted = converter.convertText(t, .persian, .english, allocator) catch return;
-                defer allocator.free(converted);
-                _ = clipboard.setClipboardText(converted);
-            },
-            .convert_case => {
-                const converted = converter.convertTextPreserveCase(t, .english, .persian, allocator) catch return;
-                defer allocator.free(converted);
-                _ = clipboard.setClipboardText(converted);
-            },
-            .search_google => {
-                _ = search.openGoogleSearch(t, allocator);
-            },
-            .translate => {},
-            .qr_code => {},
-        }
     }
 }
 
