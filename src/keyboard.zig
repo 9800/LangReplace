@@ -6,7 +6,12 @@ const DWORD = windows.DWORD;
 
 const INPUT_KEYBOARD: DWORD = 1;
 const KEYEVENTF_KEYUP: DWORD = 0x0002;
+
+const VK_SHIFT: u16 = 0x10;
 const VK_CONTROL: u16 = 0x11;
+const VK_HOME: u16 = 0x24;
+const VK_END: u16 = 0x23;
+const VK_RIGHT: u16 = 0x27;
 
 pub const VK_C: u16 = 0x43;
 pub const VK_V: u16 = 0x56;
@@ -68,4 +73,26 @@ pub fn simulateCtrlCombo(vk: u16) void {
         keyInput(VK_CONTROL, KEYEVENTF_KEYUP),
     };
     _ = SendInput(4, &inputs[0], @sizeOf(INPUT));
+}
+
+// ✅ انتخاب خودکار خط جاری (بدون نیاز به انتخاب دستی)
+pub fn selectCurrentLine() void {
+    var inputs: [6]INPUT = .{
+        keyInput(VK_HOME, 0),
+        keyInput(VK_HOME, KEYEVENTF_KEYUP),
+        keyInput(VK_SHIFT, 0),
+        keyInput(VK_END, 0),
+        keyInput(VK_END, KEYEVENTF_KEYUP),
+        keyInput(VK_SHIFT, KEYEVENTF_KEYUP),
+    };
+    _ = SendInput(6, &inputs[0], @sizeOf(INPUT));
+}
+
+// جمع‌کردن selection بعد از کپی (برای جستجو)
+pub fn collapseSelection() void {
+    var inputs: [2]INPUT = .{
+        keyInput(VK_RIGHT, 0),
+        keyInput(VK_RIGHT, KEYEVENTF_KEYUP),
+    };
+    _ = SendInput(2, &inputs[0], @sizeOf(INPUT));
 }
