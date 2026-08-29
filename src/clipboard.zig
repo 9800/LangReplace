@@ -5,9 +5,11 @@ const HWND = windows.HWND;
 const HANDLE = windows.HANDLE;
 const UINT = windows.UINT;
 const DWORD = windows.DWORD;
-const HGLOBAL = windows.HGLOBAL;
 const SIZE_T = windows.SIZE_T;
 const BOOL = windows.BOOL;
+
+// ✅ تعریف دستی HGLOBAL (در std.os.windows نیست)
+const HGLOBAL = *anyopaque;
 
 extern "user32" fn OpenClipboard(hWndNewOwner: ?HWND) callconv(windows.WINAPI) BOOL;
 extern "user32" fn CloseClipboard() callconv(windows.WINAPI) BOOL;
@@ -29,8 +31,8 @@ pub fn getClipboardText(allocator: std.mem.Allocator) !?[]u8 {
     defer _ = CloseClipboard();
 
     const hData = GetClipboardData(CF_UNICODETEXT) orelse return null;
-    const pData = GlobalLock(hData) orelse return null;
-    defer _ = GlobalUnlock(hData);
+    const pData = GlobalLock(@ptrCast(hData)) orelse return null;
+    defer _ = GlobalUnlock(@ptrCast(hData));
 
     const wideText: [*]const u16 = @ptrCast(@alignCast(pData));
     var len: usize = 0;
