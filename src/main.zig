@@ -16,6 +16,21 @@ const HINSTANCE = windows.HINSTANCE;
 const DWORD = windows.DWORD;
 const BOOL = windows.BOOL;
 
+// ✅ تعریف دستی POINT و MSG (در std.os.windows نیستن)
+const POINT = extern struct {
+    x: i32,
+    y: i32,
+};
+
+const MSG = extern struct {
+    hwnd: ?HWND,
+    message: UINT,
+    wParam: WPARAM,
+    lParam: LPARAM,
+    time: DWORD,
+    pt: POINT,
+};
+
 const classNameW = std.unicode.utf8ToUtf16LeStringLiteral("LangReplaceWindow");
 const windowNameW = std.unicode.utf8ToUtf16LeStringLiteral("LangReplace");
 
@@ -36,9 +51,9 @@ extern "user32" fn CreateWindowExW(
 ) callconv(windows.WINAPI) ?HWND;
 extern "user32" fn ShowWindow(hWnd: HWND, nCmdShow: i32) callconv(windows.WINAPI) BOOL;
 extern "user32" fn UpdateWindow(hWnd: HWND) callconv(windows.WINAPI) BOOL;
-extern "user32" fn GetMessageW(lpMsg: *windows.MSG, hWnd: ?HWND, wMsgFilterMin: UINT, wMsgFilterMax: UINT) callconv(windows.WINAPI) BOOL;
-extern "user32" fn TranslateMessage(lpMsg: *const windows.MSG) callconv(windows.WINAPI) BOOL;
-extern "user32" fn DispatchMessageW(lpMsg: *const windows.MSG) callconv(windows.WINAPI) LRESULT;
+extern "user32" fn GetMessageW(lpMsg: *MSG, hWnd: ?HWND, wMsgFilterMin: UINT, wMsgFilterMax: UINT) callconv(windows.WINAPI) BOOL;
+extern "user32" fn TranslateMessage(lpMsg: *const MSG) callconv(windows.WINAPI) BOOL;
+extern "user32" fn DispatchMessageW(lpMsg: *const MSG) callconv(windows.WINAPI) LRESULT;
 extern "user32" fn DefWindowProcW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT;
 extern "user32" fn PostQuitMessage(nExitCode: i32) callconv(windows.WINAPI) void;
 extern "user32" fn MessageBoxA(hWnd: ?HWND, lpText: windows.LPCSTR, lpCaption: windows.LPCSTR, uType: UINT) callconv(windows.WINAPI) i32;
@@ -187,7 +202,7 @@ pub fn main() !void {
     _ = ShowWindow(hWnd, SW_HIDE);
     _ = UpdateWindow(hWnd);
 
-    var msg: windows.MSG = undefined;
+    var msg: MSG = undefined;
     while (GetMessageW(&msg, null, 0, 0) != 0) {
         _ = TranslateMessage(&msg);
         _ = DispatchMessageW(&msg);
