@@ -8,7 +8,6 @@ const DWORD = windows.DWORD;
 const SIZE_T = windows.SIZE_T;
 const BOOL = windows.BOOL;
 
-// ✅ تعریف دستی HGLOBAL (در std.os.windows نیست)
 const HGLOBAL = *anyopaque;
 
 extern "user32" fn OpenClipboard(hWndNewOwner: ?HWND) callconv(windows.WINAPI) BOOL;
@@ -16,6 +15,7 @@ extern "user32" fn CloseClipboard() callconv(windows.WINAPI) BOOL;
 extern "user32" fn GetClipboardData(uFormat: UINT) callconv(windows.WINAPI) ?HANDLE;
 extern "user32" fn SetClipboardData(uFormat: UINT, hMem: ?HANDLE) callconv(windows.WINAPI) ?HANDLE;
 extern "user32" fn EmptyClipboard() callconv(windows.WINAPI) BOOL;
+extern "user32" fn GetClipboardSequenceNumber() callconv(windows.WINAPI) DWORD;
 
 extern "kernel32" fn GlobalAlloc(uFlags: UINT, dwBytes: SIZE_T) callconv(windows.WINAPI) ?HGLOBAL;
 extern "kernel32" fn GlobalLock(hMem: HGLOBAL) callconv(windows.WINAPI) ?*anyopaque;
@@ -23,6 +23,10 @@ extern "kernel32" fn GlobalUnlock(hMem: HGLOBAL) callconv(windows.WINAPI) BOOL;
 
 const GMEM_MOVEABLE: UINT = 0x0002;
 const CF_UNICODETEXT: UINT = 13;
+
+pub fn getSequence() DWORD {
+    return GetClipboardSequenceNumber();
+}
 
 pub fn getClipboardText(allocator: std.mem.Allocator) !?[]u8 {
     if (OpenClipboard(null) == 0) {
