@@ -98,12 +98,16 @@ fn waitForClipboardChange(old_seq: DWORD) bool {
     return false;
 }
 
-fn copySelection(allocator: std.mem.Allocator) ?[]u8 {
-    const seq = clipboard.getSequence();
-    keyboard.simulateCtrlCombo(keyboard.VK_C);
-    if (!waitForClipboardChange(seq)) return null;
-    const text = clipboard.getClipboardText(allocator) catch return null;
-    return text;
+fn convertByMode(text: []const u8, mode: ConvertMode, allocator: std.mem.Allocator) ?[]u8 {
+    return switch (mode) {
+        .auto_detect => blk: {
+            const layout = converter.detectLayout(text);
+            const target: converter.KeyboardLayout = if (layout == .persian) .english else .persian;
+            break :blk converter.convertText(text, layout, target, allocator) catch return null;
+        },
+        .force_english => converter.convertText(text, .persian, .english, allocator) catch return null,
+        .force_persian_case => converter.convertTextPreserveCase(text, .english, .persian, allocator) catch return null,
+    };
 }
 
 fn utf16Len(text: []const u8, allocator: std.mem.Allocator) usize {
@@ -119,10 +123,15 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
         .search_google => {
             keyboard.selectCurrentLine();
             std.time.sleep(30 * std.time.ns_per_ms);
-            const text = copySelection(allocator) orelse return;
-            defer allocator.free(text);
-            keyboard.collapseSelection();
-            _ = search.openGoogleSearch(text, allocator);
+            const seq = clipboard.getSequence();
+            keyboard.simulateCtrlCombo(keyboard.VK_C);
+            if (!waitForClipboardChange(seq)) return;
+            const text = clipboard.getClipboardText(allocator) catch return;
+            if (text) |t| {
+                defer allocator.free(t);
+                keyboard.collapseSelection();
+                _ = search.openGoogleSearch(t, allocator);
+            }
             return;
         },
         .translate => return,
@@ -137,40 +146,54 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
         else => unreachable,
     };
 
-    // ۱) انتخاب خودکار خط جاری + کپی
+    // ===== حالت A: متن انتخاب‌شده وجود داره (هر برنامه‌ای) =====
+    const seqA = clipboard.getSequence();
+    keyboard.simulateCtrlCombo(keyboard.VK_C);
+    if (waitForClipboardChange(seqA)) {
+        const text = clipboard.getClipboardText(allocator) catch return;
+        if (text) |t| {
+            defer allocator.free(t);
+            if (t.len == 0) return;
+            const converted = convertByMode(t, mode, allocator) orelse return;
+            defer allocator.free(converted);
+            if (std.mem.eql(u8, converted, t)) return; // هیچ تغییری لازم نیست
+            _ = clipboard.setClipboardText(converted);
+            std.time.sleep(50 * std.time.ns_per_ms);
+            keyboard.simulateCtrlCombo(keyboard.VK_V);
+            return;
+        }
+        return;
+    }
+
+    // ===== حالت B: بدون انتخاب → انتخاب خودکار خط جاری (ادیتورها) =====
     keyboard.selectCurrentLine();
     std.time.sleep(30 * std.time.ns_per_ms);
 
-    const text = copySelection(allocator) orelse {
-        keyboard.collapseSelection();
-        return;
-    };
-    defer allocator.free(text);
-    if (text.len == 0) {
+    const seqB = clipboard.getSequence();
+    keyboard.simulateCtrlCombo(keyboard.VK_C);
+    if (!waitForClipboardChange(seqB)) {
         keyboard.collapseSelection();
         return;
     }
 
-    // ۲) تبدیل
-    const converted = switch (mode) {
-        .auto_detect => blk: {
-            const layout = converter.detectLayout(text);
-            const target: converter.KeyboardLayout = if (layout == .persian) .english else .persian;
-            break :blk converter.convertText(text, layout, target, allocator) catch return;
-        },
-        .force_english => converter.convertText(text, .persian, .english, allocator) catch return,
-        .force_persian_case => converter.convertTextPreserveCase(text, .english, .persian, allocator) catch return,
-    };
-    defer allocator.free(converted);
+    const text = clipboard.getClipboardText(allocator) catch return;
+    if (text) |t| {
+        defer allocator.free(t);
+        if (t.len == 0) {
+            keyboard.collapseSelection();
+            return;
+        }
 
-    // ۳) ✅ جایگزینی قطعی: اول خط → حذف خط قبلی → تایپ متن جدید
-    const old_len = utf16Len(text, allocator);
+        const converted = convertByMode(t, mode, allocator) orelse return;
+        defer allocator.free(converted);
 
-    keyboard.moveHome();
-    std.time.sleep(20 * std.time.ns_per_ms);
-    keyboard.deleteChars(old_len);
-    std.time.sleep(20 * std.time.ns_per_ms);
-    keyboard.typeUnicodeText(converted, allocator);
+        const old_len = utf16Len(t, allocator);
+        keyboard.moveHome();
+        std.time.sleep(20 * std.time.ns_per_ms);
+        keyboard.deleteChars(old_len);
+        std.time.sleep(20 * std.time.ns_per_ms);
+        keyboard.typeUnicodeText(converted, allocator);
+    }
 }
 
 fn handleMenuCommand(cmd: usize, hWnd: HWND) void {
