@@ -1,6 +1,7 @@
 const std = @import("std");
 const windows = std.os.windows;
 const config = @import("config.zig");
+const lang = @import("lang.zig");
 
 const HWND = windows.HWND;
 const UINT = windows.UINT;
@@ -15,6 +16,7 @@ const ID_CHK_UPPER: usize = 2001;
 const ID_CHK_ENG: usize = 2002;
 const ID_CHK_MOUSE: usize = 2003;
 const ID_OK: usize = 2301;
+const ID_LANG: usize = 2401;
 
 const WS_CHILD: windows.DWORD = 0x40000000;
 const WS_VISIBLE: windows.DWORD = 0x10000000;
@@ -45,7 +47,6 @@ const WNDCLASSEXW = extern struct {
 };
 
 const clsW = std.unicode.utf8ToUtf16LeStringLiteral("LangReplaceSettings");
-const titleW = std.unicode.utf8ToUtf16LeStringLiteral("LangReplace - Settings");
 const btnClsW = std.unicode.utf8ToUtf16LeStringLiteral("BUTTON");
 const stcClsW = std.unicode.utf8ToUtf16LeStringLiteral("STATIC");
 
@@ -53,6 +54,16 @@ var g_hInst: ?HINSTANCE = null;
 var g_parent: ?HWND = null;
 var pending: config.Config = .{};
 var label_hwnds: [6]?HWND = .{ null, null, null, null, null, null };
+var lang_btn: ?HWND = null;
+
+fn mkWide(allocator: std.mem.Allocator, s: []const u8) ?[:0]u16 {
+    const w = std.unicode.utf8ToUtf16LeAlloc(allocator, s) catch return null;
+    defer allocator.free(w);
+    const z = allocator.alloc(u16, w.len + 1) catch return null;
+    @memcpy(z[0..w.len], w);
+    z[w.len] = 0;
+    return z[0..w.len :0];
+}
 
 fn down(v: i32) bool {
     return (@as(u16, @bitCast(GetAsyncKeyState(v))) & 0x8000) != 0;
@@ -98,24 +109,34 @@ fn getHotkeyPtr(i: usize) *config.Hotkey {
     };
 }
 
+fn setWide(hWnd: ?HWND, s: []const u8) void {
+    const allocator = std.heap.page_allocator;
+    const w = mkWide(allocator, s) orelse return;
+    defer allocator.free(w);
+    if (hWnd) |h| _ = SetWindowTextW(h, w);
+}
+
 fn refreshLabel(i: usize, allocator: std.mem.Allocator) void {
     const lbl = config.hotkeyLabel(getHotkeyPtr(i).*, allocator);
     defer allocator.free(lbl);
-    const w = std.unicode.utf8ToUtf16LeAlloc(allocator, lbl) catch return;
+    const w = mkWide(allocator, lbl) orelse return;
     defer allocator.free(w);
-    const z = allocator.alloc(u16, w.len + 1) catch return;
-    defer allocator.free(z);
-    @memcpy(z[0..w.len], w);
-    z[w.len] = 0;
-    const zs: [:0]u16 = z[0..w.len :0];
-    if (label_hwnds[i]) |h| {
-        _ = SetWindowTextW(h, zs);
-    }
+    if (label_hwnds[i]) |h| _ = SetWindowTextW(h, w);
 }
 
-fn createControl(class: windows.LPCWSTR, text: windows.LPCWSTR, style: windows.DWORD, x: i32, y: i32, w: i32, h: i32, id: usize, parent: HWND) ?HWND {
+fn langLabel() []const u8 {
+    return if (pending.language == 1)
+        lang.t("Language: Persian", "زبان: فارسی")
+    else
+        lang.t("Language: English", "زبان: English");
+}
+
+fn addControl(parent: HWND, classW: windows.LPCWSTR, textUtf8: []const u8, style: windows.DWORD, x: i32, y: i32, w: i32, h: i32, id: usize) ?HWND {
+    const allocator = std.heap.page_allocator;
+    const tw = mkWide(allocator, textUtf8) orelse return null;
+    defer allocator.free(tw);
     const hMenu: ?windows.HMENU = if (id == 0) null else @ptrFromInt(id);
-    return CreateWindowExW(0, class, text, WS_CHILD | WS_VISIBLE | style, x, y, w, h, parent, hMenu, g_hInst, null);
+    return CreateWindowExW(0, classW, tw, WS_CHILD | WS_VISIBLE | style, x, y, w, h, parent, hMenu, g_hInst, null);
 }
 
 fn settingsProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT {
@@ -130,6 +151,11 @@ fn settingsProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(
                     getHotkeyPtr(idx).* = hk;
                     refreshLabel(idx, allocator);
                 }
+                return 0;
+            }
+            if (id == ID_LANG) {
+                pending.language = if (pending.language == 1) 0 else 1;
+                setWide(lang_btn, langLabel());
                 return 0;
             }
             if (id == ID_OK) {
@@ -156,10 +182,6 @@ fn settingsProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(
     }
 }
 
-fn chkHwnd(id: usize) HWND {
-    return @ptrFromInt(id);
-}
-
 pub fn openSettings(hInst: ?HINSTANCE, parent: ?HWND) void {
     g_hInst = hInst;
     g_parent = parent;
@@ -174,41 +196,39 @@ pub fn openSettings(hInst: ?HINSTANCE, parent: ?HWND) void {
     };
     _ = RegisterClassExW(&wc);
 
-    const hWnd = CreateWindowExW(0, clsW, titleW, 0x00CF0000, 100, 100, 460, 420, parent, null, hInst, null) orelse return;
+    const title = mkWide(allocator, lang.t("LangReplace - Settings", "LangReplace - تنظیمات")) orelse return;
+    defer allocator.free(title);
 
-    const c1 = std.unicode.utf8ToUtf16LeStringLiteral("Ignore Upper case when converting");
-    const c2 = std.unicode.utf8ToUtf16LeStringLiteral("Ignore English when reversing text");
-    const c3 = std.unicode.utf8ToUtf16LeStringLiteral("Enable operation with mouse middle button");
-    _ = createControl(btnClsW, c1, BS_CHECKBOX, 20, 20, 400, 24, ID_CHK_UPPER, hWnd);
-    _ = createControl(btnClsW, c2, BS_CHECKBOX, 20, 48, 400, 24, ID_CHK_ENG, hWnd);
-    _ = createControl(btnClsW, c3, BS_CHECKBOX, 20, 76, 400, 24, ID_CHK_MOUSE, hWnd);
+    const hWnd = CreateWindowExW(0, clsW, title, 0x00CF0000, 100, 100, 460, 460, parent, null, hInst, null) orelse return;
 
-    if (pending.ignore_upper_case) _ = SendMessageW(chkHwnd(ID_CHK_UPPER), BM_SETCHECK, 1, 0);
-    if (pending.ignore_english) _ = SendMessageW(chkHwnd(ID_CHK_ENG), BM_SETCHECK, 1, 0);
-    if (pending.enable_middle_mouse) _ = SendMessageW(chkHwnd(ID_CHK_MOUSE), BM_SETCHECK, 1, 0);
+    _ = addControl(hWnd, btnClsW, lang.t("Ignore Upper case when converting", "نادیده گرفتن بزرگی حروف هنگام تبدیل"), BS_CHECKBOX, 20, 20, 400, 24, ID_CHK_UPPER);
+    _ = addControl(hWnd, btnClsW, lang.t("Ignore English when reversing text", "نادیده گرفتن انگلیسی هنگام معکوس کردن"), BS_CHECKBOX, 20, 48, 400, 24, ID_CHK_ENG);
+    _ = addControl(hWnd, btnClsW, lang.t("Enable operation with mouse middle button", "فعال‌سازی با دکمه وسط موس"), BS_CHECKBOX, 20, 76, 400, 24, ID_CHK_MOUSE);
 
-    const names = [_]windows.LPCWSTR{
-        std.unicode.utf8ToUtf16LeStringLiteral("Convert  abc <-> FA"),
-        std.unicode.utf8ToUtf16LeStringLiteral("Reverse  FA <-> abc"),
-        std.unicode.utf8ToUtf16LeStringLiteral("Case     abc <-> ABC"),
-        std.unicode.utf8ToUtf16LeStringLiteral("Search in Google"),
-        std.unicode.utf8ToUtf16LeStringLiteral("Translate"),
-        std.unicode.utf8ToUtf16LeStringLiteral("QR Code"),
+    if (pending.ignore_upper_case) _ = SendMessageW(@ptrFromInt(ID_CHK_UPPER), BM_SETCHECK, 1, 0);
+    if (pending.ignore_english) _ = SendMessageW(@ptrFromInt(ID_CHK_ENG), BM_SETCHECK, 1, 0);
+    if (pending.enable_middle_mouse) _ = SendMessageW(@ptrFromInt(ID_CHK_MOUSE), BM_SETCHECK, 1, 0);
+
+    const names = [_][]const u8{
+        lang.t("Convert  abc <-> FA", "تبدیل  abc <-> فارسی"),
+        lang.t("Reverse  FA <-> abc", "معکوس  فارسی <-> abc"),
+        lang.t("Case     abc <-> ABC", "بزرگی  abc <-> ABC"),
+        lang.t("Search in Google", "جستجو در گوگل"),
+        lang.t("Translate", "ترجمه"),
+        lang.t("QR Code", "کیوآر کد"),
     };
-    const chW = std.unicode.utf8ToUtf16LeStringLiteral("Change Key");
-    const emptyW = std.unicode.utf8ToUtf16LeStringLiteral("");
 
     var i: usize = 0;
     while (i < 6) : (i += 1) {
         const y: i32 = @intCast(110 + i * 34);
-        _ = createControl(btnClsW, chW, BS_PUSHBUTTON, 20, y, 100, 28, BTN_CHANGE_BASE + i, hWnd);
-        _ = createControl(stcClsW, names[i], 0, 130, y + 5, 200, 22, 0, hWnd);
-        label_hwnds[i] = createControl(stcClsW, emptyW, 0, 340, y + 5, 90, 22, 3001 + i, hWnd);
+        _ = addControl(hWnd, btnClsW, lang.t("Change Key", "تغییر کلید"), BS_PUSHBUTTON, 20, y, 100, 28, BTN_CHANGE_BASE + i);
+        _ = addControl(hWnd, stcClsW, names[i], 0, 130, y + 5, 200, 22, 0);
+        label_hwnds[i] = addControl(hWnd, stcClsW, "", 0, 340, y + 5, 90, 22, 3001 + i);
         refreshLabel(i, allocator);
     }
 
-    const okW = std.unicode.utf8ToUtf16LeStringLiteral("OK / Save");
-    _ = createControl(btnClsW, okW, BS_PUSHBUTTON, 20, 330, 120, 32, ID_OK, hWnd);
+    lang_btn = addControl(hWnd, btnClsW, langLabel(), BS_PUSHBUTTON, 20, 330, 200, 32, ID_LANG);
+    _ = addControl(hWnd, btnClsW, lang.t("OK / Save", "تأیید / ذخیره"), BS_PUSHBUTTON, 240, 330, 120, 32, ID_OK);
 
     _ = ShowWindow(hWnd, SW_SHOW);
     _ = UpdateWindow(hWnd);
