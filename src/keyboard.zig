@@ -5,6 +5,7 @@ const UINT = windows.UINT;
 const DWORD = windows.DWORD;
 
 const INPUT_KEYBOARD: DWORD = 1;
+const KEYEVENTF_EXTENDEDKEY: DWORD = 0x0001;
 const KEYEVENTF_KEYUP: DWORD = 0x0002;
 const KEYEVENTF_UNICODE: DWORD = 0x0004;
 
@@ -32,8 +33,19 @@ const INPUT = extern struct {
 
 extern "user32" fn SendInput(cInputs: UINT, pInputs: *INPUT, cbSize: i32) callconv(windows.WINAPI) UINT;
 
+// ✅ کلیدهای Extended (مثل کیبورد واقعی)
+fn isExtendedKey(vk: u16) bool {
+    return switch (vk) {
+        0x21...0x28, // PRIOR NEXT END HOME LEFT UP RIGHT DOWN
+        0x2D, 0x2E, // INSERT DELETE
+        else => false,
+    };
+}
+
 fn keyInput(vk: u16, flags: DWORD) INPUT {
-    return INPUT{ .type = INPUT_KEYBOARD, .u = .{ .ki = .{ .wVk = vk, .wScan = 0, .dwFlags = flags, .time = 0, .dwExtraInfo = 0 } } };
+    var f = flags;
+    if (isExtendedKey(vk)) f |= KEYEVENTF_EXTENDEDKEY;
+    return INPUT{ .type = INPUT_KEYBOARD, .u = .{ .ki = .{ .wVk = vk, .wScan = 0, .dwFlags = f, .time = 0, .dwExtraInfo = 0 } } };
 }
 
 fn unicodeInput(scan: u16, flags: DWORD) INPUT {
@@ -62,7 +74,6 @@ pub fn selectCurrentLine() void {
     _ = SendInput(6, &inputs[0], @sizeOf(INPUT));
 }
 
-// ✅ انتخاب کلمه قبلی (روش جایگزین وقتی Home/End کار نمی‌کنه)
 pub fn selectPreviousWord() void {
     var inputs: [6]INPUT = .{
         keyInput(VK_CONTROL, 0),
