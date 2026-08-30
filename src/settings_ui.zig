@@ -227,7 +227,6 @@ fn colorMessages(Msg: UINT, wParam: WPARAM, lParam: LPARAM) ?LRESULT {
         },
         WM_CTLCOLORSTATIC => {
             const hdc: HDC = @ptrFromInt(wParam);
-            _ = lParam;
             _ = SetTextColor(hdc, COL_TEXT);
             _ = SetBkMode(hdc, 1);
             ensureBrushes();
@@ -307,18 +306,9 @@ pub fn pickLanguage(hInst: ?HINSTANCE) u32 {
     const hWnd = CreateWindowExW(WS_EX_TOPMOST, pickClsW, title, 0x00CF0000, 400, 300, 420, 200, null, null, hInst, null) orelse return 0;
     roundCorners(hWnd);
 
-    const desc = mkWide(allocator, "زبان برنامه را انتخاب کنید\r\nChoose the interface language:") orelse return 0;
-    defer allocator.free(desc);
     _ = addControl(hWnd, stcClsW, "زبان برنامه را انتخاب کنید\r\nChoose the interface language:", 0, 20, 15, 370, 40, 0);
-    _ = desc;
-
-    const faW = "فارسی";
-    _ = faW;
     _ = addControl(hWnd, btnClsW, "فارسی", BS_OWNERDRAW, 40, 80, 150, 50, ID_PICK_FA);
     _ = addControl(hWnd, btnClsW, "English", BS_OWNERDRAW, 220, 80, 150, 50, ID_PICK_EN);
-
-    const credit = mkWide(allocator, lang.t("Programmer: Nikan Rayan", "برنامه‌نویس: نیکان رایان")) orelse return 0;
-    defer allocator.free(credit);
     _ = addControl(hWnd, stcClsW, lang.t("Programmer: Nikan Rayan", "برنامه‌نویس: نیکان رایان"), 0, 20, 145, 370, 20, 0);
 
     _ = ShowWindow(hWnd, SW_SHOW);
