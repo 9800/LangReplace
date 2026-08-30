@@ -380,4 +380,11 @@ pub fn main() !void {
         _ = TranslateMessage(&msg);
         _ = DispatchMessageW(&msg);
     }
+// ✅ انتخاب زبان در اولین اجرا با دکمه‌های «فارسی» و «English»
+fn firstRunLanguage() void {
+    if (config.fileExists()) return;
+    const choice = settings_ui.pickLanguage(g_hInstance);
+    config.g_config.language = choice;
+    config.save(config.g_config, std.heap.page_allocator);
+}
 }
