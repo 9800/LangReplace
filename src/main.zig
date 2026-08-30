@@ -14,6 +14,7 @@ const WPARAM = windows.WPARAM;
 const LPARAM = windows.LPARAM;
 const LRESULT = windows.LRESULT;
 const HINSTANCE = windows.HINSTANCE;
+const HICON = windows.HICON;
 const DWORD = windows.DWORD;
 const BOOL = windows.BOOL;
 
@@ -51,6 +52,12 @@ extern "user32" fn DispatchMessageW(lpMsg: *const MSG) callconv(windows.WINAPI) 
 extern "user32" fn DefWindowProcW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT;
 extern "user32" fn PostQuitMessage(nExitCode: i32) callconv(windows.WINAPI) void;
 extern "user32" fn MessageBoxA(hWnd: ?HWND, lpText: windows.LPCSTR, lpCaption: windows.LPCSTR, uType: UINT) callconv(windows.WINAPI) i32;
+extern "user32" fn LoadImageW(hInst: ?HINSTANCE, name: [*:0]const u16, type: UINT, cx: i32, cy: i32, fuLoad: UINT) callconv(windows.WINAPI) ?HICON;
+extern "kernel32" fn GetModuleFileNameW(hModule: ?windows.HMODULE, lpFileName: [*]u16, nSize: DWORD) callconv(windows.WINAPI) DWORD;
+
+const IMAGE_ICON: UINT = 1;
+const LR_LOADFROMFILE: UINT = 0x0010;
+const LR_DEFAULTSIZE: UINT = 0x0040;
 
 const WNDCLASSEXW = extern struct {
     cbSize: UINT,
@@ -59,12 +66,12 @@ const WNDCLASSEXW = extern struct {
     cbClsExtra: i32,
     cbWndExtra: i32,
     hInstance: ?HINSTANCE,
-    hIcon: ?windows.HICON,
+    hIcon: ?HICON,
     hCursor: ?windows.HCURSOR,
     hbrBackground: ?windows.HBRUSH,
     lpszMenuName: ?windows.LPCWSTR,
     lpszClassName: windows.LPCWSTR,
-    hIconSm: ?windows.HICON,
+    hIconSm: ?HICON,
 };
 
 const WM_HOTKEY: UINT = 0x0312;
@@ -76,11 +83,34 @@ const CW_USEDEFAULT: i32 = @as(i32, @bitCast(@as(u32, 0x80000000)));
 
 var g_hInstance: ?HINSTANCE = null;
 var g_tray: ?tray.TrayManager = null;
+var g_icon: ?HICON = null;
 
 const ConvertMode = enum { auto_detect, force_english, force_persian_case };
 
-fn notify(title: []const u8, msg: []const u8) void {
-    if (g_tray) |*t| t.showBalloon(title, msg);
+fn notify(msg: []const u8) void {
+    if (g_tray) |*t| t.showBalloon("LangReplace", msg);
+}
+
+// ✅ بارگذاری icon.ico از کنار فایل exe
+fn loadAppIcon() ?HICON {
+    var buf: [4096]u16 = undefined;
+    const len = GetModuleFileNameW(null, &buf, buf.len);
+    if (len == 0 or len >= buf.len) return null;
+
+    var last_slash: usize = 0;
+    var i: usize = 0;
+    while (i < len) : (i += 1) {
+        if (buf[i] == '\\' or buf[i] == '/') last_slash = i;
+    }
+
+    const name = [_]u16{ 'i', 'c', 'o', 'n', '.', 'i', 'c', 'o' };
+    const base = last_slash + 1;
+    if (base + name.len + 1 >= buf.len) return null;
+
+    for (name, 0..) |c, j| buf[base + j] = c;
+    buf[base + name.len] = 0;
+
+    return LoadImageW(null, buf[0..base].ptr, IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE);
 }
 
 fn waitForClipboardChange(old_seq: DWORD) bool {
@@ -110,6 +140,15 @@ fn utf16Len(text: []const u8, allocator: std.mem.Allocator) usize {
     return units.len;
 }
 
+fn readLineNow(allocator: std.mem.Allocator) ?[]u8 {
+    keyboard.selectCurrentLine();
+    std.time.sleep(30 * std.time.ns_per_ms);
+    const seq = clipboard.getSequence();
+    keyboard.simulateCtrlCombo(keyboard.VK_C);
+    if (!waitForClipboardChange(seq)) return null;
+    return clipboard.getClipboardText(allocator) catch null;
+}
+
 fn replaceLineInPlace(old_text: []const u8, new_text: []const u8, allocator: std.mem.Allocator) void {
     const old_len = utf16Len(old_text, allocator);
     keyboard.moveHome();
@@ -119,22 +158,38 @@ fn replaceLineInPlace(old_text: []const u8, new_text: []const u8, allocator: std
     keyboard.typeUnicodeText(new_text, allocator);
 }
 
+// ✅ خودترمیمی: بررسی نتیجه + روش پشتیبان
+fn verifiedReplace(old_text: []const u8, converted: []const u8, allocator: std.mem.Allocator) void {
+    replaceLineInPlace(old_text, converted, allocator);
+    std.time.sleep(150 * std.time.ns_per_ms);
+
+    const line_now = readLineNow(allocator) orelse {
+        notify("✓ تبدیل شد");
+        return;
+    };
+    defer allocator.free(line_now);
+
+    if (std.mem.eql(u8, line_now, converted)) {
+        notify("✓ تبدیل شد");
+        return;
+    }
+
+    // روش پشتیبان: خط (که الان انتخاب شده) رو با Ctrl+V جایگزین کن
+    _ = clipboard.setClipboardText(converted);
+    std.time.sleep(50 * std.time.ns_per_ms);
+    keyboard.simulateCtrlCombo(keyboard.VK_V);
+    notify("✓ تبدیل شد (روش پشتیبان)");
+}
+
 fn handleHotkey(id: hotkey.HotkeyId) void {
     const allocator = std.heap.page_allocator;
 
     switch (id) {
         .search_google => {
-            keyboard.selectCurrentLine();
-            std.time.sleep(30 * std.time.ns_per_ms);
-            const seq = clipboard.getSequence();
-            keyboard.simulateCtrlCombo(keyboard.VK_C);
-            if (!waitForClipboardChange(seq)) return;
-            const text = clipboard.getClipboardText(allocator) catch return;
-            if (text) |t| {
-                defer allocator.free(t);
-                keyboard.collapseSelection();
-                _ = search.openGoogleSearch(t, allocator);
-            }
+            const text = readLineNow(allocator) orelse return;
+            defer allocator.free(text);
+            keyboard.collapseSelection();
+            _ = search.openGoogleSearch(text, allocator);
             return;
         },
         .translate => return,
@@ -149,7 +204,7 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
         else => unreachable,
     };
 
-    // ===== مسیر ۱: اگه از قبل متنی انتخاب‌شده باشه =====
+    // ===== مسیر ۱: متن انتخاب‌شده از قبل =====
     const seqA = clipboard.getSequence();
     keyboard.simulateCtrlCombo(keyboard.VK_C);
     if (waitForClipboardChange(seqA)) {
@@ -163,7 +218,7 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
                     _ = clipboard.setClipboardText(converted);
                     std.time.sleep(50 * std.time.ns_per_ms);
                     keyboard.simulateCtrlCombo(keyboard.VK_V);
-                    notify("LangReplace", "تبدیل انجام شد ✓");
+                    notify("✓ تبدیل شد");
                 }
                 return;
             }
@@ -172,53 +227,50 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
     }
 
     // ===== مسیر ۲: بدون انتخاب → خط جاری =====
-    keyboard.selectCurrentLine();
-    std.time.sleep(30 * std.time.ns_per_ms);
-    const seqB = clipboard.getSequence();
-    keyboard.simulateCtrlCombo(keyboard.VK_C);
-    if (waitForClipboardChange(seqB)) {
-        const text = clipboard.getClipboardText(allocator) catch return;
-        if (text) |t| {
-            defer allocator.free(t);
-            if (t.len > 0) {
-                const converted = convertByMode(t, mode, allocator) orelse return;
-                defer allocator.free(converted);
-                replaceLineInPlace(t, converted, allocator);
-                notify("LangReplace", "تبدیل انجام شد ✓");
-                return;
+    const text = readLineNow(allocator) orelse {
+        // ===== مسیر ۳: کلمه قبلی =====
+        keyboard.selectPreviousWord();
+        std.time.sleep(30 * std.time.ns_per_ms);
+        const seqC = clipboard.getSequence();
+        keyboard.simulateCtrlCombo(keyboard.VK_C);
+        if (waitForClipboardChange(seqC)) {
+            const t3 = clipboard.getClipboardText(allocator) catch return;
+            if (t3) |t| {
+                defer allocator.free(t);
+                if (t.len > 0) {
+                    const converted = convertByMode(t, mode, allocator) orelse return;
+                    defer allocator.free(converted);
+                    if (!std.mem.eql(u8, converted, t)) {
+                        _ = clipboard.setClipboardText(converted);
+                        std.time.sleep(50 * std.time.ns_per_ms);
+                        keyboard.simulateCtrlCombo(keyboard.VK_V);
+                        notify("✓ تبدیل شد");
+                    }
+                    return;
+                }
             }
         }
+        keyboard.collapseSelection();
+        notify("✗ متنی برای تبدیل پیدا نشد");
+        return;
+    };
+    defer allocator.free(text);
+
+    if (text.len == 0) {
         keyboard.collapseSelection();
         return;
     }
 
-    // ===== مسیر ۳: بدون انتخاب → کلمه قبلی =====
-    keyboard.selectPreviousWord();
-    std.time.sleep(30 * std.time.ns_per_ms);
-    const seqC = clipboard.getSequence();
-    keyboard.simulateCtrlCombo(keyboard.VK_C);
-    if (waitForClipboardChange(seqC)) {
-        const text = clipboard.getClipboardText(allocator) catch return;
-        if (text) |t| {
-            defer allocator.free(t);
-            if (t.len > 0) {
-                const converted = convertByMode(t, mode, allocator) orelse return;
-                defer allocator.free(converted);
-                if (!std.mem.eql(u8, converted, t)) {
-                    _ = clipboard.setClipboardText(converted);
-                    std.time.sleep(50 * std.time.ns_per_ms);
-                    keyboard.simulateCtrlCombo(keyboard.VK_V);
-                    notify("LangReplace", "تبدیل انجام شد ✓");
-                }
-                return;
-            }
-        }
+    const converted = convertByMode(text, mode, allocator) orelse return;
+    defer allocator.free(converted);
+
+    if (std.mem.eql(u8, converted, text)) {
+        keyboard.collapseSelection();
         return;
     }
 
-    // ===== هیچ متنی پیدا نشد =====
-    keyboard.collapseSelection();
-    notify("LangReplace", "متنی برای تبدیل پیدا نشد");
+    // ✅ جایگزینی با بررسی خودکار + روش پشتیبان
+    verifiedReplace(text, converted, allocator);
 }
 
 fn handleMenuCommand(cmd: usize, hWnd: HWND) void {
@@ -269,6 +321,7 @@ fn windowProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(wi
 pub fn main() !void {
     const hModule = windows.kernel32.GetModuleHandleW(null);
     g_hInstance = @ptrCast(hModule);
+    g_icon = loadAppIcon();
 
     const wc: WNDCLASSEXW = .{
         .cbSize = @sizeOf(WNDCLASSEXW),
@@ -277,12 +330,12 @@ pub fn main() !void {
         .cbClsExtra = 0,
         .cbWndExtra = 0,
         .hInstance = g_hInstance,
-        .hIcon = null,
+        .hIcon = g_icon,
         .hCursor = null,
         .hbrBackground = null,
         .lpszMenuName = null,
         .lpszClassName = classNameW,
-        .hIconSm = null,
+        .hIconSm = g_icon,
     };
 
     _ = RegisterClassExW(&wc);
@@ -293,7 +346,7 @@ pub fn main() !void {
         null, null, g_hInstance, null,
     ) orelse return error.WindowCreationFailed;
 
-    g_tray = try tray.TrayManager.init(hWnd);
+    g_tray = try tray.TrayManager.init(hWnd, g_icon);
     _ = hotkey.registerHotkeys(hWnd);
 
     _ = ShowWindow(hWnd, SW_HIDE);
