@@ -129,7 +129,6 @@ fn readLineNow(allocator: std.mem.Allocator) ?[]u8 {
     return clipboard.getClipboardText(allocator) catch null;
 }
 
-// ✅ نوشتن بدون Ctrl+V: حذف انتخاب + تایپ یونیکد
 fn writeOverSelection(converted: []const u8, allocator: std.mem.Allocator) void {
     keyboard.deleteSelection();
     std.time.sleep(20 * std.time.ns_per_ms);
@@ -161,28 +160,9 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
 
     logWrite("=== F10 pressed ===");
 
-    // ===== مسیر ۱: متن انتخاب‌شده از قبل =====
-    const seqA = clipboard.getSequence();
-    keyboard.simulateCtrlCombo(keyboard.VK_C);
-    if (waitForClipboardChange(seqA)) {
-        const text = clipboard.getClipboardText(allocator) catch return;
-        if (text) |t| {
-            defer allocator.free(t);
-            logWrite("PATH1");
-            if (t.len == 0) return;
-            const converted = convertByMode(t, mode, allocator) orelse return;
-            defer allocator.free(converted);
-            if (std.mem.eql(u8, converted, t)) return;
-            writeOverSelection(converted, allocator);
-            notify("✓ تبدیل شد");
-            return;
-        }
-        return;
-    }
-
-    // ===== مسیر ۲: بدون انتخاب → خط جاری =====
+    // ===== مسیر اصلی: خط جاری (بدون نیاز به انتخاب — مسیر اثبات‌شده) =====
     const text = readLineNow(allocator) orelse {
-        // ===== مسیر ۳: کلمه قبلی =====
+        // ===== مسیر پشتیبان: کلمه قبلی =====
         keyboard.selectPreviousWord();
         std.time.sleep(30 * std.time.ns_per_ms);
         const seqC = clipboard.getSequence();
@@ -191,7 +171,7 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
             const t3 = clipboard.getClipboardText(allocator) catch return;
             if (t3) |t| {
                 defer allocator.free(t);
-                logWrite("PATH3");
+                logWrite("PATH-WORD");
                 if (t.len == 0) return;
                 const converted = convertByMode(t, mode, allocator) orelse return;
                 defer allocator.free(converted);
@@ -208,7 +188,7 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
     };
     defer allocator.free(text);
 
-    logWrite("PATH2");
+    logWrite("PATH-LINE");
 
     if (text.len == 0) {
         keyboard.collapseSelection();
@@ -224,7 +204,7 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
         return;
     }
 
-    // خط الان انتخاب شده → حذف + تایپ
+    // خط انتخاب شده → حذف + تایپ متن تبدیل‌شده
     writeOverSelection(converted, allocator);
     std.time.sleep(150 * std.time.ns_per_ms);
 
@@ -242,7 +222,6 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
         return;
     }
 
-    // اگه هنوز خرابه: خط (که الان انتخاب شده) رو دوباره حذف+تایپ کن
     logWrite("VERIFY: mismatch -> rewrite");
     writeOverSelection(converted, allocator);
     notify("✓ تبدیل شد (روش پشتیبان)");
