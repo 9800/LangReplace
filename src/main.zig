@@ -80,7 +80,6 @@ const WM_DESTROY: UINT = 0x0002;
 const SW_HIDE: i32 = 0;
 const WS_OVERLAPPEDWINDOW: DWORD = 0x00CF0000;
 const CW_USEDEFAULT: i32 = @as(i32, @bitCast(@as(u32, 0x80000000)));
-
 const MB_TOP: UINT = 0x40 | 0x00001000 | 0x00010000;
 
 var g_hInstance: ?HINSTANCE = null;
@@ -98,6 +97,20 @@ fn toWideZ(allocator: std.mem.Allocator, s: []const u8) ?[:0]u16 {
     @memcpy(z[0..w.len], w);
     z[w.len] = 0;
     return z[0..w.len :0];
+}
+
+// ✅ درباره برنامه + تشکر (کلیک چپ روی آیکون و منوی درباره)
+fn showAbout(hWnd: HWND) void {
+    const allocator = std.heap.page_allocator;
+    const body = lang.t(
+        "LangReplace 1.0\n\nProgrammer: Nikan Rayan\n\nThank you for choosing LangReplace! 💜",
+        "LangReplace 1.0\n\nبرنامه‌نویس: نیکان رایان\n\nاز اینکه LangReplace را انتخاب کردید سپاسگزاریم! 💜",
+    );
+    const bodyW = toWideZ(allocator, body) orelse return;
+    defer allocator.free(bodyW);
+    const titleW = toWideZ(allocator, lang.t("About", "درباره")) orelse return;
+    defer allocator.free(titleW);
+    _ = MessageBoxW(hWnd, bodyW, titleW, MB_TOP);
 }
 
 fn logWrite(msg: []const u8) void {
@@ -172,6 +185,7 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
             const text = readLineNow(allocator) orelse return;
             defer allocator.free(text);
             keyboard.collapseSelection();
+            if (text.len == 0) return;
             _ = search.openGoogleSearch(text, allocator);
             return;
         },
@@ -190,8 +204,8 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
                 return;
             };
             defer allocator.free(result);
-
             logWrite("TRANSLATE: ok");
+
             const bodyW = toWideZ(allocator, result) orelse return;
             defer allocator.free(bodyW);
             const titleW = toWideZ(allocator, lang.t("LangReplace - Translate", "LangReplace - ترجمه")) orelse return;
@@ -201,7 +215,10 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
         },
         .qr_code => {
             logWrite("=== Ctrl+M QR ===");
-            const text = readLineNow(allocator) orelse return;
+            const text = readLineNow(allocator) orelse {
+                notify(lang.t("✗ No text found", "✗ متنی پیدا نشد"));
+                return;
+            };
             defer allocator.free(text);
             keyboard.collapseSelection();
             if (text.len == 0) return;
@@ -282,13 +299,16 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
 
 fn handleMenuCommand(cmd: usize, hWnd: HWND) void {
     switch (cmd) {
+        tray.MENU_ID_SETTINGS => {
+            settings_ui.openSettings(g_hInstance, hWnd);
+        },
+        tray.MENU_ID_ABOUT => {
+            showAbout(hWnd);
+        },
         tray.MENU_ID_EXIT => {
             if (g_tray) |*t| t.cleanup();
             hotkey.unregisterHotkeys(hWnd);
             PostQuitMessage(0);
-        },
-        tray.MENU_ID_SETTINGS => {
-            settings_ui.openSettings(g_hInstance, hWnd);
         },
         else => {},
     }
@@ -314,6 +334,9 @@ fn windowProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(wi
                     const cmd = t.showContextMenu(pt.x, pt.y);
                     if (cmd != 0) handleMenuCommand(cmd, hWnd);
                 }
+            } else if (mouse_msg == tray.WM_LBUTTONUP) {
+                // ✅ کلیک چپ روی آیکون = درباره + تشکر
+                showAbout(hWnd);
             }
             return 0;
         },
@@ -327,7 +350,6 @@ fn windowProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(wi
     }
 }
 
-// ✅ انتخاب زبان در اولین اجرا با دکمه‌های «فارسی» و «English»
 fn firstRunLanguage() void {
     if (config.fileExists()) return;
     const choice = settings_ui.pickLanguage(g_hInstance);
