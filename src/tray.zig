@@ -56,7 +56,6 @@ const NOTIFYICONDATAW = extern struct {
 
 const tipW = std.unicode.utf8ToUtf16LeStringLiteral("LangReplace");
 
-// ✅ تبدیل دستی UTF-8 به UTF-16 (بدون وابستگی به API خاص)
 fn copyUtf8ToUtf16(dest: []u16, source: []const u8) usize {
     var di: usize = 0;
     var view = std.unicode.Utf8View.init(source) catch return 0;
@@ -81,7 +80,7 @@ pub const TrayManager = struct {
     hWnd: HWND,
     nid: NOTIFYICONDATAW,
 
-    pub fn init(hWnd: HWND) !TrayManager {
+    pub fn init(hWnd: HWND, hIcon: ?HICON) !TrayManager {
         var nid: NOTIFYICONDATAW = undefined;
         const bytes: [*]u8 = @ptrCast(&nid);
         @memset(bytes[0..@sizeOf(NOTIFYICONDATAW)], 0);
@@ -91,7 +90,7 @@ pub const TrayManager = struct {
         nid.uID = 1;
         nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
         nid.uCallbackMessage = WM_TRAYICON;
-        nid.hIcon = LoadIconW(null, @as(windows.LPCWSTR, @ptrFromInt(32512)));
+        nid.hIcon = hIcon orelse LoadIconW(null, @as(windows.LPCWSTR, @ptrFromInt(32512)));
         @memcpy(nid.szTip[0..tipW.len], tipW);
 
         if (Shell_NotifyIconW(NIM_ADD, &nid) == 0) return error.TrayIconFailed;
