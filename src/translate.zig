@@ -17,6 +17,15 @@ const WINHTTP_FLAG_SECURE: u32 = 0x00800000;
 const getW = std.unicode.utf8ToUtf16LeStringLiteral("GET");
 const agentW = std.unicode.utf8ToUtf16LeStringLiteral("LangReplace");
 
+fn logWrite(msg: []const u8) void {
+    var file = std.fs.cwd().openFile("langreplace_debug.log", .{ .mode = .write_only }) catch
+        (std.fs.cwd().createFile("langreplace_debug.log", .{}) catch return);
+    defer file.close();
+    file.seekFromEnd(0) catch return;
+    file.writeAll(msg) catch return;
+    file.writeAll("\r\n") catch return;
+}
+
 fn toWideZ(allocator: std.mem.Allocator, s: []const u8) ?[:0]u16 {
     const w = std.unicode.utf8ToUtf16LeAlloc(allocator, s) catch return null;
     defer allocator.free(w);
@@ -31,7 +40,6 @@ pub fn urlEncode(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
     var out = std.ArrayList(u8).init(allocator);
     errdefer out.deinit();
     for (s) |b| {
-        // ✅ نام درست در Zig 0.13
         if (std.ascii.isAlphanumeric(b) or b == '-' or b == '_' or b == '.' or b == '~') {
             try out.append(b);
         } else {
@@ -49,32 +57,57 @@ fn httpGet(host: []const u8, path: []const u8, allocator: std.mem.Allocator) ?[]
     const pathW = toWideZ(allocator, path) orelse return null;
     defer allocator.free(pathW);
 
-    const hSession = WinHttpOpen(agentW, 0, null, null, 0) orelse return null;
+    const hSession = WinHttpOpen(agentW, 0, null, null, 0) orelse {
+        logWrite("HTTP: WinHttpOpen failed");
+        return null;
+    };
     defer _ = WinHttpCloseHandle(hSession);
 
-    const hConnect = WinHttpConnect(hSession, hostW, 443, 0) orelse return null;
+    const hConnect = WinHttpConnect(hSession, hostW, 443, 0) orelse {
+        logWrite("HTTP: connect failed");
+        return null;
+    };
     defer _ = WinHttpCloseHandle(hConnect);
 
-    const hRequest = WinHttpOpenRequest(hConnect, getW, pathW, null, null, null, WINHTTP_FLAG_SECURE) orelse return null;
+    const hRequest = WinHttpOpenRequest(hConnect, getW, pathW, null, null, null, WINHTTP_FLAG_SECURE) orelse {
+        logWrite("HTTP: openRequest failed");
+        return null;
+    };
     defer _ = WinHttpCloseHandle(hRequest);
 
-    if (WinHttpSendRequest(hRequest, null, 0, null, 0, 0, 0) == 0) return null;
-    if (WinHttpReceiveResponse(hRequest, null) == 0) return null;
+    if (WinHttpSendRequest(hRequest, null, 0, null, 0, 0, 0) == 0) {
+        logWrite("HTTP: send failed");
+        return null;
+    }
+    if (WinHttpReceiveResponse(hRequest, null) == 0) {
+        logWrite("HTTP: receive failed");
+        return null;
+    }
 
     var out = std.ArrayList(u8).init(allocator);
     errdefer out.deinit();
     var buf: [4096]u8 = undefined;
     while (true) {
         var read: u32 = 0;
-        if (WinHttpReadData(hRequest, &buf, buf.len, &read) == 0) return null;
+        if (WinHttpReadData(hRequest, &buf, buf.len, &read) == 0) {
+            logWrite("HTTP: read failed");
+            return null;
+        }
         if (read == 0) break;
         out.appendSlice(buf[0..read]) catch return null;
     }
     return out.toOwnedSlice() catch null;
 }
 
-// ✅ ترجمه خودکار: فارسی→انگلیسی و برعکس
-pub fn translate(text: []const u8, allocator: std.mem.Allocator) ?[]u8 {
+fn logBody(prefix: []const u8, body: []const u8) void {
+    var buf: [300]u8 = undefined;
+    const n = @min(body.len, 200);
+    const m = std.fmt.bufPrint(&buf, "{s}: {s}", .{ prefix, body[0..n] }) catch return;
+    logWrite(m);
+}
+
+// ===== موتور ۱: گوگل =====
+fn translateGoogle(text: []const u8, allocator: std.mem.Allocator) ?[]u8 {
     const layout = converter.detectLayout(text);
     const target = if (layout == .persian) "en" else "fa";
 
@@ -88,10 +121,14 @@ pub fn translate(text: []const u8, allocator: std.mem.Allocator) ?[]u8 {
     ) catch return null;
     defer allocator.free(path);
 
+    logWrite("TR-GOOGLE: requesting...");
     const resp = httpGet("translate.googleapis.com", path, allocator) orelse return null;
     defer allocator.free(resp);
 
-    const parsed = std.json.parseFromSlice(std.json.Value, allocator, resp, .{}) catch return null;
+    const parsed = std.json.parseFromSlice(std.json.Value, allocator, resp, .{}) catch {
+        logBody("TR-GOOGLE: parse failed", resp);
+        return null;
+    };
     defer parsed.deinit();
 
     var out = std.ArrayList(u8).init(allocator);
@@ -109,5 +146,55 @@ pub fn translate(text: []const u8, allocator: std.mem.Allocator) ?[]u8 {
         }
     }
 
+    if (out.items.len == 0) {
+        logBody("TR-GOOGLE: empty result", resp);
+        return null;
+    }
+    logWrite("TR-GOOGLE: ok");
     return out.toOwnedSlice() catch null;
+}
+
+// ===== موتور ۲: MyMemory (fallback) =====
+fn translateMyMemory(text: []const u8, allocator: std.mem.Allocator) ?[]u8 {
+    const layout = converter.detectLayout(text);
+    const pair = if (layout == .persian) "fa|en" else "en|fa";
+
+    const q = urlEncode(allocator, text) catch return null;
+    defer allocator.free(q);
+    const p = urlEncode(allocator, pair) catch return null;
+    defer allocator.free(p);
+
+    const path = std.fmt.allocPrint(allocator, "/get?q={s}&langpair={s}", .{ q, p }) catch return null;
+    defer allocator.free(path);
+
+    logWrite("TR-MYMEMORY: requesting...");
+    const resp = httpGet("api.mymemory.translated.net", path, allocator) orelse return null;
+    defer allocator.free(resp);
+
+    const parsed = std.json.parseFromSlice(std.json.Value, allocator, resp, .{}) catch {
+        logBody("TR-MYMEMORY: parse failed", resp);
+        return null;
+    };
+    defer parsed.deinit();
+
+    const root = parsed.value;
+    if (root == .object) {
+        if (root.object.get("responseData")) |rd| {
+            if (rd == .object) {
+                if (rd.object.get("translatedText")) |tt| {
+                    if (tt == .string and tt.string.len > 0) {
+                        logWrite("TR-MYMEMORY: ok");
+                        return allocator.dupe(u8, tt.string) catch null;
+                    }
+                }
+            }
+        }
+    }
+    logBody("TR-MYMEMORY: bad shape", resp);
+    return null;
+}
+
+// ✅ ترجمه با fallback خودکار
+pub fn translate(text: []const u8, allocator: std.mem.Allocator) ?[]u8 {
+    return translateGoogle(text, allocator) orelse translateMyMemory(text, allocator);
 }
