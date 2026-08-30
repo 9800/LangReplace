@@ -8,6 +8,8 @@ const converter = @import("converter.zig");
 const search = @import("search.zig");
 const keyboard = @import("keyboard.zig");
 const translate = @import("translate.zig");
+const config = @import("config.zig");
+const settings_ui = @import("settings_ui.zig");
 
 const HWND = windows.HWND;
 const UINT = windows.UINT;
@@ -53,7 +55,6 @@ extern "user32" fn TranslateMessage(lpMsg: *const MSG) callconv(windows.WINAPI) 
 extern "user32" fn DispatchMessageW(lpMsg: *const MSG) callconv(windows.WINAPI) LRESULT;
 extern "user32" fn DefWindowProcW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT;
 extern "user32" fn PostQuitMessage(nExitCode: i32) callconv(windows.WINAPI) void;
-extern "user32" fn MessageBoxA(hWnd: ?HWND, lpText: windows.LPCSTR, lpCaption: windows.LPCSTR, uType: UINT) callconv(windows.WINAPI) i32;
 extern "user32" fn MessageBoxW(hWnd: ?HWND, lpText: [*:0]const u16, lpCaption: [*:0]const u16, uType: UINT) callconv(windows.WINAPI) i32;
 extern "user32" fn LoadIconW(hInstance: ?HINSTANCE, lpIconName: usize) callconv(windows.WINAPI) ?HICON;
 extern "user32" fn GetCursorPos(lpPoint: *POINT) callconv(windows.WINAPI) BOOL;
@@ -266,7 +267,7 @@ fn handleMenuCommand(cmd: usize, hWnd: HWND) void {
             PostQuitMessage(0);
         },
         tray.MENU_ID_SETTINGS => {
-            _ = MessageBoxA(hWnd, "Settings window coming soon!", "LangReplace", 0x40);
+            settings_ui.openSettings(g_hInstance, hWnd);
         },
         tray.MENU_ID_CONVERT => handleHotkey(.convert),
         else => {},
@@ -285,7 +286,6 @@ fn windowProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(wi
             return 0;
         },
         tray.WM_TRAYICON => {
-            // ✅ lParam در WM_TRAYICON = پیام ماوس
             const mouse_msg: UINT = @intCast(lParam & 0xFFFF);
             if (mouse_msg == tray.WM_RBUTTONUP) {
                 if (g_tray) |*t| {
@@ -311,6 +311,7 @@ pub fn main() !void {
     const hModule = windows.kernel32.GetModuleHandleW(null);
     g_hInstance = @ptrCast(hModule);
     g_icon = loadAppIcon();
+    config.g_config = config.load(std.heap.page_allocator);
 
     const wc: WNDCLASSEXW = .{
         .cbSize = @sizeOf(WNDCLASSEXW),
@@ -336,7 +337,7 @@ pub fn main() !void {
     ) orelse return error.WindowCreationFailed;
 
     g_tray = try tray.TrayManager.init(hWnd, g_icon);
-    _ = hotkey.registerHotkeys(hWnd);
+    _ = hotkey.registerHotkeys(hWnd, config.g_config);
 
     _ = ShowWindow(hWnd, SW_HIDE);
     _ = UpdateWindow(hWnd);
