@@ -52,6 +52,8 @@ extern "user32" fn DispatchMessageW(lpMsg: *const MSG) callconv(windows.WINAPI) 
 extern "user32" fn DefWindowProcW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT;
 extern "user32" fn PostQuitMessage(nExitCode: i32) callconv(windows.WINAPI) void;
 extern "user32" fn MessageBoxA(hWnd: ?HWND, lpText: windows.LPCSTR, lpCaption: windows.LPCSTR, uType: UINT) callconv(windows.WINAPI) i32;
+
+// ✅ پارامتر دوم usize (همون MAKEINTRESOURCE بدون مشکل هم‌ترازی)
 extern "user32" fn LoadIconW(hInstance: ?HINSTANCE, lpIconName: usize) callconv(windows.WINAPI) ?HICON;
 
 const WNDCLASSEXW = extern struct {
@@ -86,10 +88,9 @@ fn notify(msg: []const u8) void {
     if (g_tray) |*t| t.showBalloon("LangReplace", msg);
 }
 
-// ✅ آیکون از ریسورس داخل خود exe (MAKEINTRESOURCE(1))
+// ✅ آیکون از ریسورس داخل خود exe (شناسه 1) + fallback به آیکون پیش‌فرض
 fn loadAppIcon() ?HICON {
-    return LoadIconW(g_hInstance, @as(windows.LPCWSTR, @ptrFromInt(1))) orelse
-        LoadIconW(null, @as(windows.LPCWSTR, @ptrFromInt(32512)));
+    return LoadIconW(g_hInstance, 1) orelse LoadIconW(null, 32512);
 }
 
 fn waitForClipboardChange(old_seq: DWORD) bool {
