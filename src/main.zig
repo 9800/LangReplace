@@ -52,12 +52,7 @@ extern "user32" fn DispatchMessageW(lpMsg: *const MSG) callconv(windows.WINAPI) 
 extern "user32" fn DefWindowProcW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT;
 extern "user32" fn PostQuitMessage(nExitCode: i32) callconv(windows.WINAPI) void;
 extern "user32" fn MessageBoxA(hWnd: ?HWND, lpText: windows.LPCSTR, lpCaption: windows.LPCSTR, uType: UINT) callconv(windows.WINAPI) i32;
-extern "user32" fn LoadImageW(hInst: ?HINSTANCE, name: [*:0]const u16, type: UINT, cx: i32, cy: i32, fuLoad: UINT) callconv(windows.WINAPI) ?HICON;
-extern "kernel32" fn GetModuleFileNameW(hModule: ?windows.HMODULE, lpFileName: [*]u16, nSize: DWORD) callconv(windows.WINAPI) DWORD;
-
-const IMAGE_ICON: UINT = 1;
-const LR_LOADFROMFILE: UINT = 0x0010;
-const LR_DEFAULTSIZE: UINT = 0x0040;
+extern "user32" fn LoadIconW(hInstance: ?HINSTANCE, lpIconName: windows.LPCWSTR) callconv(windows.WINAPI) ?HICON;
 
 const WNDCLASSEXW = extern struct {
     cbSize: UINT,
@@ -91,26 +86,10 @@ fn notify(msg: []const u8) void {
     if (g_tray) |*t| t.showBalloon("LangReplace", msg);
 }
 
-// ✅ بارگذاری icon.ico از کنار فایل exe
+// ✅ آیکون از ریسورس داخل خود exe (MAKEINTRESOURCE(1))
 fn loadAppIcon() ?HICON {
-    var buf: [4096]u16 = undefined;
-    const len = GetModuleFileNameW(null, &buf, buf.len);
-    if (len == 0 or len >= buf.len) return null;
-
-    var last_slash: usize = 0;
-    var i: usize = 0;
-    while (i < len) : (i += 1) {
-        if (buf[i] == '\\' or buf[i] == '/') last_slash = i;
-    }
-
-    const name = [_]u16{ 'i', 'c', 'o', 'n', '.', 'i', 'c', 'o' };
-    const base = last_slash + 1;
-    if (base + name.len + 1 >= buf.len) return null;
-
-    for (name, 0..) |c, j| buf[base + j] = c;
-    buf[base + name.len] = 0;
-
-    return LoadImageW(null, buf[0..base].ptr, IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE);
+    return LoadIconW(g_hInstance, @as(windows.LPCWSTR, @ptrFromInt(1))) orelse
+        LoadIconW(null, @as(windows.LPCWSTR, @ptrFromInt(32512)));
 }
 
 fn waitForClipboardChange(old_seq: DWORD) bool {
@@ -158,7 +137,6 @@ fn replaceLineInPlace(old_text: []const u8, new_text: []const u8, allocator: std
     keyboard.typeUnicodeText(new_text, allocator);
 }
 
-// ✅ خودترمیمی: بررسی نتیجه + روش پشتیبان
 fn verifiedReplace(old_text: []const u8, converted: []const u8, allocator: std.mem.Allocator) void {
     replaceLineInPlace(old_text, converted, allocator);
     std.time.sleep(150 * std.time.ns_per_ms);
@@ -174,7 +152,6 @@ fn verifiedReplace(old_text: []const u8, converted: []const u8, allocator: std.m
         return;
     }
 
-    // روش پشتیبان: خط (که الان انتخاب شده) رو با Ctrl+V جایگزین کن
     _ = clipboard.setClipboardText(converted);
     std.time.sleep(50 * std.time.ns_per_ms);
     keyboard.simulateCtrlCombo(keyboard.VK_V);
@@ -269,7 +246,6 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
         return;
     }
 
-    // ✅ جایگزینی با بررسی خودکار + روش پشتیبان
     verifiedReplace(text, converted, allocator);
 }
 
