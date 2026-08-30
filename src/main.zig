@@ -7,6 +7,7 @@ const clipboard = @import("clipboard.zig");
 const converter = @import("converter.zig");
 const search = @import("search.zig");
 const keyboard = @import("keyboard.zig");
+const translate = @import("translate.zig");
 
 const HWND = windows.HWND;
 const UINT = windows.UINT;
@@ -146,7 +147,25 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
             _ = search.openGoogleSearch(text, allocator);
             return;
         },
-        .translate => return,
+        .translate => {
+            logWrite("=== Ctrl+T translate ===");
+            const text = readLineNow(allocator) orelse {
+                notify("✗ متنی برای ترجمه پیدا نشد");
+                return;
+            };
+            defer allocator.free(text);
+            keyboard.collapseSelection();
+            if (text.len == 0) return;
+
+            const result = translate.translate(text, allocator) orelse {
+                notify("✗ ترجمه انجام نشد (اینترنت؟)");
+                return;
+            };
+            defer allocator.free(result);
+            logWrite("TRANSLATE: ok");
+            notify(result);
+            return;
+        },
         .qr_code => return,
         else => {},
     }
@@ -160,9 +179,7 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
 
     logWrite("=== F10 pressed ===");
 
-    // ===== مسیر اصلی: خط جاری (بدون نیاز به انتخاب — مسیر اثبات‌شده) =====
     const text = readLineNow(allocator) orelse {
-        // ===== مسیر پشتیبان: کلمه قبلی =====
         keyboard.selectPreviousWord();
         std.time.sleep(30 * std.time.ns_per_ms);
         const seqC = clipboard.getSequence();
@@ -204,11 +221,9 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
         return;
     }
 
-    // خط انتخاب شده → حذف + تایپ متن تبدیل‌شده
     writeOverSelection(converted, allocator);
     std.time.sleep(150 * std.time.ns_per_ms);
 
-    // بررسی نهایی
     const line_now = readLineNow(allocator) orelse {
         logWrite("VERIFY: null");
         notify("✓ تبدیل شد");
