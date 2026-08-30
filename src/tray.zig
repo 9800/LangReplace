@@ -7,6 +7,8 @@ const DWORD = windows.DWORD;
 const HICON = windows.HICON;
 const BOOL = windows.BOOL;
 const UINT_PTR = usize;
+const WPARAM = windows.WPARAM;
+const LPARAM = windows.LPARAM;
 
 extern "shell32" fn Shell_NotifyIconW(dwMessage: DWORD, lpData: *NOTIFYICONDATAW) callconv(windows.WINAPI) BOOL;
 extern "user32" fn LoadIconW(hInstance: ?windows.HINSTANCE, lpIconName: windows.LPCWSTR) callconv(windows.WINAPI) ?HICON;
@@ -15,6 +17,7 @@ extern "user32" fn AppendMenuA(hMenu: windows.HMENU, uFlags: UINT, uIDNewItem: U
 extern "user32" fn TrackPopupMenu(hMenu: windows.HMENU, uFlags: UINT, x: i32, y: i32, nReserved: i32, hWnd: HWND, prcRect: ?*const windows.RECT) callconv(windows.WINAPI) BOOL;
 extern "user32" fn DestroyMenu(hMenu: windows.HMENU) callconv(windows.WINAPI) BOOL;
 extern "user32" fn SetForegroundWindow(hWnd: HWND) callconv(windows.WINAPI) BOOL;
+extern "user32" fn PostMessageW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) BOOL;
 
 const NIM_ADD: DWORD = 0;
 const NIM_MODIFY: DWORD = 1;
@@ -26,9 +29,11 @@ const NIF_INFO: UINT = 0x10;
 const NIIF_INFO: DWORD = 1;
 const WM_USER: UINT = 0x0400;
 pub const WM_TRAYICON: UINT = WM_USER + 1;
+pub const WM_RBUTTONUP: UINT = 0x0205;
 const MF_STRING: UINT = 0;
 const TPM_RIGHTBUTTON: UINT = 0x0002;
 const TPM_RETURNCMD: UINT = 0x0080;
+const TPM_BOTTOMALIGN: UINT = 0x0020;
 
 pub const MENU_ID_SETTINGS: UINT_PTR = 1001;
 pub const MENU_ID_CONVERT: UINT_PTR = 1002;
@@ -109,6 +114,7 @@ pub const TrayManager = struct {
         _ = Shell_NotifyIconW(NIM_MODIFY, &nid);
     }
 
+    // ✅ X,Y از بیرون میاد (با GetCursorPos)
     pub fn showContextMenu(self: *TrayManager, x: i32, y: i32) UINT_PTR {
         const hMenu = CreatePopupMenu() orelse return 0;
         defer _ = DestroyMenu(hMenu);
@@ -118,7 +124,17 @@ pub const TrayManager = struct {
         _ = AppendMenuA(hMenu, MF_STRING, MENU_ID_EXIT, "Exit");
 
         _ = SetForegroundWindow(self.hWnd);
-        const cmd = TrackPopupMenu(hMenu, TPM_RIGHTBUTTON | TPM_RETURNCMD, x, y, 0, self.hWnd, null);
+        const cmd = TrackPopupMenu(
+            hMenu,
+            TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_BOTTOMALIGN,
+            x,
+            y,
+            0,
+            self.hWnd,
+            null,
+        );
+        // ✅ اصلاح باگ معروف: PostMessage برای بستن خودکار منو
+        _ = PostMessageW(self.hWnd, 0, 0, 0);
         if (cmd <= 0) return 0;
         return @intCast(cmd);
     }
