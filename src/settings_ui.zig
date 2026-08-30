@@ -17,6 +17,8 @@ const ID_CHK_ENG: usize = 2002;
 const ID_CHK_MOUSE: usize = 2003;
 const ID_OK: usize = 2301;
 const ID_LANG: usize = 2401;
+const ID_PICK_FA: usize = 9001;
+const ID_PICK_EN: usize = 9002;
 
 const WS_CHILD: windows.DWORD = 0x40000000;
 const WS_VISIBLE: windows.DWORD = 0x10000000;
@@ -27,6 +29,16 @@ const WM_COMMAND: UINT = 0x0111;
 const BM_GETCHECK: UINT = 0x00F0;
 const BM_SETCHECK: UINT = 0x00F1;
 const SW_SHOW: i32 = 5;
+const WS_EX_TOPMOST: windows.DWORD = 0x00000008;
+
+const PMSG = extern struct {
+    hwnd: ?HWND,
+    message: UINT,
+    wParam: WPARAM,
+    lParam: LPARAM,
+    time: DWORD,
+    pt: extern struct { x: i32, y: i32 },
+};
 
 extern "user32" fn RegisterClassExW(w: *const WNDCLASSEXW) callconv(windows.WINAPI) u16;
 extern "user32" fn CreateWindowExW(a: windows.DWORD, b: windows.LPCWSTR, c: windows.LPCWSTR, d: windows.DWORD, e: i32, f: i32, g: i32, h: i32, i: ?HWND, j: ?windows.HMENU, k: ?HINSTANCE, l: ?*anyopaque) callconv(windows.WINAPI) ?HWND;
@@ -37,6 +49,9 @@ extern "user32" fn DestroyWindow(hWnd: HWND) callconv(windows.WINAPI) BOOL;
 extern "user32" fn SendMessageW(hWnd: HWND, Msg: UINT, w: WPARAM, l: LPARAM) callconv(windows.WINAPI) LRESULT;
 extern "user32" fn SetWindowTextW(hWnd: HWND, s: [*:0]const u16) callconv(windows.WINAPI) BOOL;
 extern "user32" fn GetAsyncKeyState(v: i32) callconv(windows.WINAPI) i16;
+extern "user32" fn GetMessageW(lpMsg: *PMSG, hWnd: ?HWND, a: UINT, b: UINT) callconv(windows.WINAPI) BOOL;
+extern "user32" fn TranslateMessage(m: *const PMSG) callconv(windows.WINAPI) BOOL;
+extern "user32" fn DispatchMessageW(m: *const PMSG) callconv(windows.WINAPI) LRESULT;
 
 const WNDCLASSEXW = extern struct {
     cbSize: UINT, style: UINT,
@@ -47,6 +62,7 @@ const WNDCLASSEXW = extern struct {
 };
 
 const clsW = std.unicode.utf8ToUtf16LeStringLiteral("LangReplaceSettings");
+const pickClsW = std.unicode.utf8ToUtf16LeStringLiteral("LangReplaceLangPick");
 const btnClsW = std.unicode.utf8ToUtf16LeStringLiteral("BUTTON");
 const stcClsW = std.unicode.utf8ToUtf16LeStringLiteral("STATIC");
 
@@ -55,6 +71,9 @@ var g_parent: ?HWND = null;
 var pending: config.Config = .{};
 var label_hwnds: [6]?HWND = .{ null, null, null, null, null, null };
 var lang_btn: ?HWND = null;
+// ✅ HWND واقعی چک‌باکس‌ها
+var chk_hwnds: [3]?HWND = .{ null, null, null };
+var lang_choice: i32 = -1;
 
 fn mkWide(allocator: std.mem.Allocator, s: []const u8) ?[:0]u16 {
     const w = std.unicode.utf8ToUtf16LeAlloc(allocator, s) catch return null;
@@ -139,6 +158,73 @@ fn addControl(parent: HWND, classW: windows.LPCWSTR, textUtf8: []const u8, style
     return CreateWindowExW(0, classW, tw, WS_CHILD | WS_VISIBLE | style, x, y, w, h, parent, hMenu, g_hInst, null);
 }
 
+// ===== پنجره انتخاب زبان (اولین اجرا) =====
+fn pickProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT {
+    switch (Msg) {
+        WM_COMMAND => {
+            const id = wParam & 0xFFFF;
+            if (id == ID_PICK_FA) {
+                lang_choice = 1;
+                _ = DestroyWindow(hWnd);
+                return 0;
+            }
+            if (id == ID_PICK_EN) {
+                lang_choice = 0;
+                _ = DestroyWindow(hWnd);
+                return 0;
+            }
+            return 0;
+        },
+        WM_CLOSE => {
+            lang_choice = 0;
+            _ = DestroyWindow(hWnd);
+            return 0;
+        },
+        else => return DefWindowProcW(hWnd, Msg, wParam, lParam),
+    }
+}
+
+pub fn pickLanguage(hInst: ?HINSTANCE) u32 {
+    lang_choice = -1;
+    const allocator = std.heap.page_allocator;
+
+    const wc: WNDCLASSEXW = .{
+        .cbSize = @sizeOf(WNDCLASSEXW), .style = 0, .lpfnWndProc = pickProc,
+        .cbClsExtra = 0, .cbWndExtra = 0, .hInstance = hInst, .hIcon = null,
+        .hCursor = null, .hbrBackground = null, .lpszMenuName = null,
+        .lpszClassName = pickClsW, .hIconSm = null,
+    };
+    _ = RegisterClassExW(&wc);
+
+    const title = mkWide(allocator, "LangReplace - زبان / Language") orelse return 0;
+    defer allocator.free(title);
+
+    const hWnd = CreateWindowExW(WS_EX_TOPMOST, pickClsW, title, 0x00CF0000, 400, 300, 400, 180, null, null, hInst, null) orelse return 0;
+
+    const desc = mkWide(allocator, "زبان برنامه را انتخاب کنید\r\nChoose the interface language:") orelse return 0;
+    defer allocator.free(desc);
+    _ = CreateWindowExW(0, stcClsW, desc, WS_CHILD | WS_VISIBLE, 20, 15, 350, 40, hWnd, null, hInst, null);
+
+    const faW = mkWide(allocator, "فارسی") orelse return 0;
+    defer allocator.free(faW);
+    _ = CreateWindowExW(0, btnClsW, faW, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 40, 80, 140, 45, hWnd, @ptrFromInt(ID_PICK_FA), hInst, null);
+
+    const enW = mkWide(allocator, "English") orelse return 0;
+    defer allocator.free(enW);
+    _ = CreateWindowExW(0, btnClsW, enW, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 210, 80, 140, 45, hWnd, @ptrFromInt(ID_PICK_EN), hInst, null);
+
+    _ = ShowWindow(hWnd, SW_SHOW);
+    _ = UpdateWindow(hWnd);
+
+    var msg: PMSG = undefined;
+    while (lang_choice == -1 and GetMessageW(&msg, null, 0, 0) != 0) {
+        _ = TranslateMessage(&msg);
+        _ = DispatchMessageW(&msg);
+    }
+    return if (lang_choice == 1) 1 else 0;
+}
+
+// ===== پنجره تنظیمات =====
 fn settingsProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT {
     const allocator = std.heap.page_allocator;
     switch (Msg) {
@@ -159,9 +245,10 @@ fn settingsProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(
                 return 0;
             }
             if (id == ID_OK) {
-                pending.ignore_upper_case = (SendMessageW(@ptrFromInt(ID_CHK_UPPER), BM_GETCHECK, 0, 0) != 0);
-                pending.ignore_english = (SendMessageW(@ptrFromInt(ID_CHK_ENG), BM_GETCHECK, 0, 0) != 0);
-                pending.enable_middle_mouse = (SendMessageW(@ptrFromInt(ID_CHK_MOUSE), BM_GETCHECK, 0, 0) != 0);
+                // ✅ خواندن با HWND واقعی
+                if (chk_hwnds[0]) |h| pending.ignore_upper_case = (SendMessageW(h, BM_GETCHECK, 0, 0) != 0);
+                if (chk_hwnds[1]) |h| pending.ignore_english = (SendMessageW(h, BM_GETCHECK, 0, 0) != 0);
+                if (chk_hwnds[2]) |h| pending.enable_middle_mouse = (SendMessageW(h, BM_GETCHECK, 0, 0) != 0);
                 config.g_config = pending;
                 config.save(pending, allocator);
                 if (g_parent) |p| {
@@ -201,13 +288,20 @@ pub fn openSettings(hInst: ?HINSTANCE, parent: ?HWND) void {
 
     const hWnd = CreateWindowExW(0, clsW, title, 0x00CF0000, 100, 100, 460, 460, parent, null, hInst, null) orelse return;
 
-    _ = addControl(hWnd, btnClsW, lang.t("Ignore Upper case when converting", "نادیده گرفتن بزرگی حروف هنگام تبدیل"), BS_CHECKBOX, 20, 20, 400, 24, ID_CHK_UPPER);
-    _ = addControl(hWnd, btnClsW, lang.t("Ignore English when reversing text", "نادیده گرفتن انگلیسی هنگام معکوس کردن"), BS_CHECKBOX, 20, 48, 400, 24, ID_CHK_ENG);
-    _ = addControl(hWnd, btnClsW, lang.t("Enable operation with mouse middle button", "فعال‌سازی با دکمه وسط موس"), BS_CHECKBOX, 20, 76, 400, 24, ID_CHK_MOUSE);
+    chk_hwnds[0] = addControl(hWnd, btnClsW, lang.t("Ignore Upper case when converting", "نادیده گرفتن بزرگی حروف هنگام تبدیل"), BS_CHECKBOX, 20, 20, 400, 24, ID_CHK_UPPER);
+    chk_hwnds[1] = addControl(hWnd, btnClsW, lang.t("Ignore English when reversing text", "نادیده گرفتن انگلیسی هنگام معکوس کردن"), BS_CHECKBOX, 20, 48, 400, 24, ID_CHK_ENG);
+    chk_hwnds[2] = addControl(hWnd, btnClsW, lang.t("Enable operation with mouse middle button", "فعال‌سازی با دکمه وسط موس"), BS_CHECKBOX, 20, 76, 400, 24, ID_CHK_MOUSE);
 
-    if (pending.ignore_upper_case) _ = SendMessageW(@ptrFromInt(ID_CHK_UPPER), BM_SETCHECK, 1, 0);
-    if (pending.ignore_english) _ = SendMessageW(@ptrFromInt(ID_CHK_ENG), BM_SETCHECK, 1, 0);
-    if (pending.enable_middle_mouse) _ = SendMessageW(@ptrFromInt(ID_CHK_MOUSE), BM_SETCHECK, 1, 0);
+    // ✅ تیک اولیه با HWND واقعی
+    if (pending.ignore_upper_case) {
+        if (chk_hwnds[0]) |h| _ = SendMessageW(h, BM_SETCHECK, 1, 0);
+    }
+    if (pending.ignore_english) {
+        if (chk_hwnds[1]) |h| _ = SendMessageW(h, BM_SETCHECK, 1, 0);
+    }
+    if (pending.enable_middle_mouse) {
+        if (chk_hwnds[2]) |h| _ = SendMessageW(h, BM_SETCHECK, 1, 0);
+    }
 
     const names = [_][]const u8{
         lang.t("Convert  abc <-> FA", "تبدیل  abc <-> فارسی"),
