@@ -10,7 +10,7 @@ const LPARAM = windows.LPARAM;
 const LRESULT = windows.LRESULT;
 const HINSTANCE = windows.HINSTANCE;
 const BOOL = windows.BOOL;
-const DWORD = windows.DWORD
+const DWORD = windows.DWORD;
 
 const BTN_CHANGE_BASE: usize = 2101;
 const ID_CHK_UPPER: usize = 2001;
@@ -21,16 +21,16 @@ const ID_LANG: usize = 2401;
 const ID_PICK_FA: usize = 9001;
 const ID_PICK_EN: usize = 9002;
 
-const WS_CHILD: windows.DWORD = 0x40000000;
-const WS_VISIBLE: windows.DWORD = 0x10000000;
-const BS_CHECKBOX: windows.DWORD = 0x3;
-const BS_PUSHBUTTON: windows.DWORD = 0x0;
+const WS_CHILD: DWORD = 0x40000000;
+const WS_VISIBLE: DWORD = 0x10000000;
+const BS_CHECKBOX: DWORD = 0x3;
+const BS_PUSHBUTTON: DWORD = 0x0;
 const WM_CLOSE: UINT = 0x0010;
 const WM_COMMAND: UINT = 0x0111;
 const BM_GETCHECK: UINT = 0x00F0;
 const BM_SETCHECK: UINT = 0x00F1;
 const SW_SHOW: i32 = 5;
-const WS_EX_TOPMOST: windows.DWORD = 0x00000008;
+const WS_EX_TOPMOST: DWORD = 0x00000008;
 
 const PMSG = extern struct {
     hwnd: ?HWND,
@@ -42,7 +42,7 @@ const PMSG = extern struct {
 };
 
 extern "user32" fn RegisterClassExW(w: *const WNDCLASSEXW) callconv(windows.WINAPI) u16;
-extern "user32" fn CreateWindowExW(a: windows.DWORD, b: windows.LPCWSTR, c: windows.LPCWSTR, d: windows.DWORD, e: i32, f: i32, g: i32, h: i32, i: ?HWND, j: ?windows.HMENU, k: ?HINSTANCE, l: ?*anyopaque) callconv(windows.WINAPI) ?HWND;
+extern "user32" fn CreateWindowExW(a: DWORD, b: windows.LPCWSTR, c: windows.LPCWSTR, d: DWORD, e: i32, f: i32, g: i32, h: i32, i: ?HWND, j: ?windows.HMENU, k: ?HINSTANCE, l: ?*anyopaque) callconv(windows.WINAPI) ?HWND;
 extern "user32" fn DefWindowProcW(hWnd: HWND, Msg: UINT, w: WPARAM, l: LPARAM) callconv(windows.WINAPI) LRESULT;
 extern "user32" fn ShowWindow(hWnd: HWND, n: i32) callconv(windows.WINAPI) BOOL;
 extern "user32" fn UpdateWindow(hWnd: HWND) callconv(windows.WINAPI) BOOL;
@@ -72,7 +72,6 @@ var g_parent: ?HWND = null;
 var pending: config.Config = .{};
 var label_hwnds: [6]?HWND = .{ null, null, null, null, null, null };
 var lang_btn: ?HWND = null;
-// ✅ HWND واقعی چک‌باکس‌ها
 var chk_hwnds: [3]?HWND = .{ null, null, null };
 var lang_choice: i32 = -1;
 
@@ -151,7 +150,7 @@ fn langLabel() []const u8 {
         lang.t("Language: English", "زبان: English");
 }
 
-fn addControl(parent: HWND, classW: windows.LPCWSTR, textUtf8: []const u8, style: windows.DWORD, x: i32, y: i32, w: i32, h: i32, id: usize) ?HWND {
+fn addControl(parent: HWND, classW: windows.LPCWSTR, textUtf8: []const u8, style: DWORD, x: i32, y: i32, w: i32, h: i32, id: usize) ?HWND {
     const allocator = std.heap.page_allocator;
     const tw = mkWide(allocator, textUtf8) orelse return null;
     defer allocator.free(tw);
@@ -159,7 +158,6 @@ fn addControl(parent: HWND, classW: windows.LPCWSTR, textUtf8: []const u8, style
     return CreateWindowExW(0, classW, tw, WS_CHILD | WS_VISIBLE | style, x, y, w, h, parent, hMenu, g_hInst, null);
 }
 
-// ===== پنجره انتخاب زبان (اولین اجرا) =====
 fn pickProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT {
     switch (Msg) {
         WM_COMMAND => {
@@ -225,7 +223,6 @@ pub fn pickLanguage(hInst: ?HINSTANCE) u32 {
     return if (lang_choice == 1) 1 else 0;
 }
 
-// ===== پنجره تنظیمات =====
 fn settingsProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT {
     const allocator = std.heap.page_allocator;
     switch (Msg) {
@@ -246,7 +243,6 @@ fn settingsProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(
                 return 0;
             }
             if (id == ID_OK) {
-                // ✅ خواندن با HWND واقعی
                 if (chk_hwnds[0]) |h| pending.ignore_upper_case = (SendMessageW(h, BM_GETCHECK, 0, 0) != 0);
                 if (chk_hwnds[1]) |h| pending.ignore_english = (SendMessageW(h, BM_GETCHECK, 0, 0) != 0);
                 if (chk_hwnds[2]) |h| pending.enable_middle_mouse = (SendMessageW(h, BM_GETCHECK, 0, 0) != 0);
@@ -293,7 +289,6 @@ pub fn openSettings(hInst: ?HINSTANCE, parent: ?HWND) void {
     chk_hwnds[1] = addControl(hWnd, btnClsW, lang.t("Ignore English when reversing text", "نادیده گرفتن انگلیسی هنگام معکوس کردن"), BS_CHECKBOX, 20, 48, 400, 24, ID_CHK_ENG);
     chk_hwnds[2] = addControl(hWnd, btnClsW, lang.t("Enable operation with mouse middle button", "فعال‌سازی با دکمه وسط موس"), BS_CHECKBOX, 20, 76, 400, 24, ID_CHK_MOUSE);
 
-    // ✅ تیک اولیه با HWND واقعی
     if (pending.ignore_upper_case) {
         if (chk_hwnds[0]) |h| _ = SendMessageW(h, BM_SETCHECK, 1, 0);
     }
