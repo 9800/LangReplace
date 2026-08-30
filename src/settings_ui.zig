@@ -16,16 +16,19 @@ const HDC = ?*anyopaque;
 const HBRUSH = ?*anyopaque;
 const HPEN = ?*anyopaque;
 const HGDIOBJ = ?*anyopaque;
+const HRGN = ?*anyopaque;
 
 const BTN_CHANGE_BASE: usize = 2101;
 const ID_CHK_UPPER: usize = 2001;
 const ID_CHK_ENG: usize = 2002;
 const ID_CHK_MOUSE: usize = 2003;
 const ID_OK: usize = 2301;
+const ID_CLOSE: usize = 2302;
 const ID_LANG: usize = 2401;
 const ID_PICK_FA: usize = 9001;
 const ID_PICK_EN: usize = 9002;
 
+const WS_POPUP: DWORD = 0x80000000;
 const WS_CHILD: DWORD = 0x40000000;
 const WS_VISIBLE: DWORD = 0x10000000;
 const BS_CHECKBOX: DWORD = 0x3;
@@ -35,10 +38,12 @@ const WM_COMMAND: UINT = 0x0111;
 const WM_ERASEBKGND: UINT = 0x0014;
 const WM_CTLCOLORSTATIC: UINT = 0x0138;
 const WM_DRAWITEM: UINT = 0x002B;
+const WM_NCHITTEST: UINT = 0x0084;
 const BM_GETCHECK: UINT = 0x00F0;
 const BM_SETCHECK: UINT = 0x00F1;
 const SW_SHOW: i32 = 5;
 const WS_EX_TOPMOST: DWORD = 0x00000008;
+const HTCAPTION: LRESULT = 2;
 const DT_CENTER: u32 = 0x1;
 const DT_VCENTER: u32 = 0x4;
 const DT_SINGLELINE: u32 = 0x20;
@@ -52,6 +57,7 @@ const COL_TEXT = rgb(70, 40, 160);
 const COL_BTN = rgb(124, 77, 255);
 const COL_OK = rgb(46, 175, 110);
 const COL_LANG = rgb(33, 150, 243);
+const COL_CLOSE = rgb(229, 57, 53);
 const COL_WHITE = rgb(255, 255, 255);
 
 var bg_brush: HBRUSH = null;
@@ -96,8 +102,10 @@ extern "user32" fn DispatchMessageW(m: *const PMSG) callconv(windows.WINAPI) LRE
 extern "user32" fn FillRect(hdc: HDC, r: *const windows.RECT, b: HBRUSH) callconv(windows.WINAPI) BOOL;
 extern "user32" fn DrawTextW(hdc: HDC, s: [*]const u16, c: i32, r: *windows.RECT, fmt: u32) callconv(windows.WINAPI) i32;
 extern "user32" fn GetWindowTextW(hWnd: HWND, s: [*]u16, c: i32) callconv(windows.WINAPI) i32;
+extern "user32" fn SetWindowRgn(hWnd: HWND, hRgn: HRGN, bRedraw: BOOL) callconv(windows.WINAPI) BOOL;
 extern "gdi32" fn CreateSolidBrush(c: u32) callconv(windows.WINAPI) HBRUSH;
 extern "gdi32" fn CreatePen(style: i32, width: i32, color: u32) callconv(windows.WINAPI) HPEN;
+extern "gdi32" fn CreateRoundRectRgn(l: i32, t: i32, r: i32, b: i32, wr: i32, hr: i32) callconv(windows.WINAPI) HRGN;
 extern "gdi32" fn SelectObject(hdc: HDC, o: HGDIOBJ) callconv(windows.WINAPI) HGDIOBJ;
 extern "gdi32" fn DeleteObject(o: HGDIOBJ) callconv(windows.WINAPI) BOOL;
 extern "gdi32" fn RoundRect(hdc: HDC, l: i32, t: i32, r: i32, b: i32, w: i32, h: i32) callconv(windows.WINAPI) BOOL;
@@ -126,10 +134,10 @@ var lang_btn: ?HWND = null;
 var chk_hwnds: [3]?HWND = .{ null, null, null };
 var lang_choice: i32 = -1;
 
-// ✅ گوشه‌های گرد (ویندوز ۱۱)
-fn roundCorners(hWnd: HWND) void {
-    const pref: DWORD = 2;
-    _ = DwmSetWindowAttribute(hWnd, 33, &pref, 4);
+// ✅ گوشه گرد واقعی روی همه ویندوزها (بدون فریم)
+fn roundRgn(hWnd: HWND, w: i32, h: i32) void {
+    const rgn = CreateRoundRectRgn(0, 0, w + 1, h + 1, 28, 28) orelse return;
+    _ = SetWindowRgn(hWnd, rgn, 1);
 }
 
 fn mkWide(allocator: std.mem.Allocator, s: []const u8) ?[:0]u16 {
@@ -145,33 +153,45 @@ fn down(v: i32) bool {
     return (@as(u16, @bitCast(GetAsyncKeyState(v))) & 0x8000) != 0;
 }
 
+fn isModKey(v: u32) bool {
+    return v == 0x10 or v == 0x11 or v == 0x12 or v == 0x1B or v == 0x5B or v == 0x5C;
+}
+
+// ✅ ضبط کلید: همه کلیدها + تایم‌اوت ۱۵ ثانیه (بدون هنگ)
 fn captureHotkey() config.Hotkey {
+    // صبر تا رها شدن همه کلیدها
     var guard: u32 = 0;
-    while (guard < 200) : (guard += 1) {
-        if (!down(0x10) and !down(0x11) and !down(0x12)) break;
+    while (guard < 300) : (guard += 1) {
+        var any = false;
+        var v: u32 = 1;
+        while (v < 0xFF) : (v += 1) {
+            if (down(@intCast(v))) {
+                any = true;
+                break;
+            }
+        }
+        if (!any) break;
         std.time.sleep(10 * std.time.ns_per_ms);
     }
-    while (true) {
-        if (down(0x1B)) return .{ .mod = 0, .vk = 0x1B };
+
+    // حداکثر ۱۵ ثانیه فرصت
+    var t: u32 = 0;
+    while (t < 1500) : (t += 1) {
+        if (down(0x1B)) return .{ .mod = 0, .vk = 0x1B }; // Escape = لغو
+
         var mod: u32 = 0;
         if (down(0x11)) mod |= config.MOD_CONTROL;
         if (down(0x10)) mod |= config.MOD_SHIFT;
         if (down(0x12)) mod |= config.MOD_ALT;
 
-        var vk: u32 = 0x70;
-        while (vk <= 0x7B) : (vk += 1) {
-            if (down(@intCast(vk))) return .{ .mod = mod, .vk = vk };
-        }
-        vk = 0x41;
-        while (vk <= 0x5A) : (vk += 1) {
-            if (down(@intCast(vk))) return .{ .mod = mod, .vk = vk };
-        }
-        vk = 0x30;
-        while (vk <= 0x39) : (vk += 1) {
-            if (down(@intCast(vk))) return .{ .mod = mod, .vk = vk };
+        var v: u32 = 7; // رد شدن از دکمه‌های موس (1..6)
+        while (v < 0xFF) : (v += 1) {
+            if (isModKey(v)) continue;
+            if (down(@intCast(v))) return .{ .mod = mod, .vk = v };
         }
         std.time.sleep(10 * std.time.ns_per_ms);
     }
+    return .{ .mod = 0, .vk = 0x1B }; // تایم‌اوت = لغو
 }
 
 fn getHotkeyPtr(i: usize) *config.Hotkey {
@@ -215,7 +235,7 @@ fn addControl(parent: HWND, classW: windows.LPCWSTR, textUtf8: []const u8, style
     return CreateWindowExW(0, classW, tw, WS_CHILD | WS_VISIBLE | style, x, y, w, h, parent, hMenu, g_hInst, null);
 }
 
-// 🎨 رنگ‌آمیزی مشترک هر دو پنجره
+// 🎨 رنگ‌آمیزی مشترک
 fn colorMessages(Msg: UINT, wParam: WPARAM, lParam: LPARAM) ?LRESULT {
     switch (Msg) {
         WM_ERASEBKGND => {
@@ -233,11 +253,10 @@ fn colorMessages(Msg: UINT, wParam: WPARAM, lParam: LPARAM) ?LRESULT {
             return @as(LRESULT, @intCast(@intFromPtr(bg_brush)));
         },
         WM_DRAWITEM => {
-            // ✅ تبدیل امن isize به usize
             const dis: *DRAWITEMSTRUCT = @ptrFromInt(@as(usize, @bitCast(lParam)));
             if (dis.hDC) |dc| {
                 const id = dis.CtlID;
-                const fill = if (id == ID_OK) COL_OK else if (id == ID_LANG) COL_LANG else if (id == ID_PICK_FA) COL_BTN else if (id == ID_PICK_EN) COL_LANG else COL_BTN;
+                const fill = if (id == ID_OK) COL_OK else if (id == ID_CLOSE) COL_CLOSE else if (id == ID_LANG) COL_LANG else if (id == ID_PICK_FA) COL_BTN else if (id == ID_PICK_EN) COL_LANG else COL_BTN;
                 const br = CreateSolidBrush(fill);
                 const pen = CreatePen(0, 2, fill);
                 const oldB = SelectObject(dc, br);
@@ -266,6 +285,7 @@ fn colorMessages(Msg: UINT, wParam: WPARAM, lParam: LPARAM) ?LRESULT {
 fn pickProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT {
     if (colorMessages(Msg, wParam, lParam)) |r| return r;
     switch (Msg) {
+        WM_NCHITTEST => return HTCAPTION, // جابه‌جایی با درگ
         WM_COMMAND => {
             const id = wParam & 0xFFFF;
             if (id == ID_PICK_FA) {
@@ -304,8 +324,9 @@ pub fn pickLanguage(hInst: ?HINSTANCE) u32 {
     const title = mkWide(allocator, "LangReplace - زبان / Language") orelse return 0;
     defer allocator.free(title);
 
-    const hWnd = CreateWindowExW(WS_EX_TOPMOST, pickClsW, title, 0x00CF0000, 400, 300, 420, 200, null, null, hInst, null) orelse return 0;
-    roundCorners(hWnd);
+    // ✅ بدون فریم (WS_POPUP)
+    const hWnd = CreateWindowExW(WS_EX_TOPMOST, pickClsW, title, WS_POPUP | WS_VISIBLE, 400, 300, 420, 200, null, null, hInst, null) orelse return 0;
+    roundRgn(hWnd, 420, 200);
 
     _ = addControl(hWnd, stcClsW, "زبان برنامه را انتخاب کنید\r\nChoose the interface language:", 0, 20, 15, 370, 40, 0);
     _ = addControl(hWnd, btnClsW, "فارسی", BS_OWNERDRAW, 40, 80, 150, 50, ID_PICK_FA);
@@ -327,6 +348,7 @@ fn settingsProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(
     if (colorMessages(Msg, wParam, lParam)) |r| return r;
     const allocator = std.heap.page_allocator;
     switch (Msg) {
+        WM_NCHITTEST => return HTCAPTION, // جابه‌جایی با درگ
         WM_COMMAND => {
             const id = wParam & 0xFFFF;
             if (id >= BTN_CHANGE_BASE and id < BTN_CHANGE_BASE + 6) {
@@ -357,6 +379,10 @@ fn settingsProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(
                 _ = DestroyWindow(hWnd);
                 return 0;
             }
+            if (id == ID_CLOSE) {
+                _ = DestroyWindow(hWnd);
+                return 0;
+            }
             return 0;
         },
         WM_CLOSE => {
@@ -384,8 +410,9 @@ pub fn openSettings(hInst: ?HINSTANCE, parent: ?HWND) void {
     const title = mkWide(allocator, lang.t("LangReplace - Settings", "LangReplace - تنظیمات")) orelse return;
     defer allocator.free(title);
 
-    const hWnd = CreateWindowExW(0, clsW, title, 0x00CF0000, 100, 100, 470, 490, parent, null, hInst, null) orelse return;
-    roundCorners(hWnd);
+    // ✅ بدون فریم
+    const hWnd = CreateWindowExW(0, clsW, title, WS_POPUP | WS_VISIBLE, 100, 100, 470, 490, parent, null, hInst, null) orelse return;
+    roundRgn(hWnd, 470, 490);
 
     chk_hwnds[0] = addControl(hWnd, btnClsW, lang.t("Ignore Upper case when converting", "نادیده گرفتن بزرگی حروف هنگام تبدیل"), BS_CHECKBOX, 20, 20, 410, 24, ID_CHK_UPPER);
     chk_hwnds[1] = addControl(hWnd, btnClsW, lang.t("Ignore English when reversing text", "نادیده گرفتن انگلیسی هنگام معکوس کردن"), BS_CHECKBOX, 20, 48, 410, 24, ID_CHK_ENG);
@@ -419,8 +446,9 @@ pub fn openSettings(hInst: ?HINSTANCE, parent: ?HWND) void {
         refreshLabel(i, allocator);
     }
 
-    lang_btn = addControl(hWnd, btnClsW, langLabel(), BS_OWNERDRAW, 20, 330, 200, 34, ID_LANG);
-    _ = addControl(hWnd, btnClsW, lang.t("OK / Save", "تأیید / ذخیره"), BS_OWNERDRAW, 240, 330, 120, 34, ID_OK);
+    lang_btn = addControl(hWnd, btnClsW, langLabel(), BS_OWNERDRAW, 20, 330, 190, 34, ID_LANG);
+    _ = addControl(hWnd, btnClsW, lang.t("OK / Save", "تأیید / ذخیره"), BS_OWNERDRAW, 225, 330, 120, 34, ID_OK);
+    _ = addControl(hWnd, btnClsW, lang.t("✕", "✕"), BS_OWNERDRAW, 360, 330, 60, 34, ID_CLOSE);
 
     _ = addControl(hWnd, stcClsW, lang.t("Programmer: Nikan Rayan 💜", "برنامه‌نویس: نیکان رایان 💜"), 0, 20, 420, 420, 24, 0);
 
