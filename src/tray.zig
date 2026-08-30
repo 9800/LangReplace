@@ -1,5 +1,6 @@
 const std = @import("std");
 const windows = std.os.windows;
+const lang = @import("lang.zig");
 
 const HWND = windows.HWND;
 const UINT = windows.UINT;
@@ -13,7 +14,7 @@ const LPARAM = windows.LPARAM;
 extern "shell32" fn Shell_NotifyIconW(dwMessage: DWORD, lpData: *NOTIFYICONDATAW) callconv(windows.WINAPI) BOOL;
 extern "user32" fn LoadIconW(hInstance: ?windows.HINSTANCE, lpIconName: windows.LPCWSTR) callconv(windows.WINAPI) ?HICON;
 extern "user32" fn CreatePopupMenu() callconv(windows.WINAPI) ?windows.HMENU;
-extern "user32" fn AppendMenuA(hMenu: windows.HMENU, uFlags: UINT, uIDNewItem: UINT_PTR, lpNewItem: windows.LPCSTR) callconv(windows.WINAPI) BOOL;
+extern "user32" fn AppendMenuW(hMenu: windows.HMENU, uFlags: UINT, uIDNewItem: UINT_PTR, lpNewItem: [*:0]const u16) callconv(windows.WINAPI) BOOL;
 extern "user32" fn TrackPopupMenu(hMenu: windows.HMENU, uFlags: UINT, x: i32, y: i32, nReserved: i32, hWnd: HWND, prcRect: ?*const windows.RECT) callconv(windows.WINAPI) BOOL;
 extern "user32" fn DestroyMenu(hMenu: windows.HMENU) callconv(windows.WINAPI) BOOL;
 extern "user32" fn SetForegroundWindow(hWnd: HWND) callconv(windows.WINAPI) BOOL;
@@ -36,7 +37,6 @@ const TPM_RETURNCMD: UINT = 0x0080;
 const TPM_BOTTOMALIGN: UINT = 0x0020;
 
 pub const MENU_ID_SETTINGS: UINT_PTR = 1001;
-pub const MENU_ID_CONVERT: UINT_PTR = 1002;
 pub const MENU_ID_EXIT: UINT_PTR = 1003;
 
 const GUID = extern struct { a: u32, b: u16, c: u16, d: [8]u8 };
@@ -81,6 +81,12 @@ fn copyUtf8ToUtf16(dest: []u16, source: []const u8) usize {
     return di;
 }
 
+fn wideBuf(buf: []u16, s: []const u8) [:0]u16 {
+    const n = copyUtf8ToUtf16(buf, s);
+    buf[n] = 0;
+    return buf[0..n :0];
+}
+
 pub const TrayManager = struct {
     hWnd: HWND,
     nid: NOTIFYICONDATAW,
@@ -114,26 +120,21 @@ pub const TrayManager = struct {
         _ = Shell_NotifyIconW(NIM_MODIFY, &nid);
     }
 
-    // ✅ X,Y از بیرون میاد (با GetCursorPos)
+    // ✅ بدون گزینه Convert + متن دوزبانه
     pub fn showContextMenu(self: *TrayManager, x: i32, y: i32) UINT_PTR {
         const hMenu = CreatePopupMenu() orelse return 0;
         defer _ = DestroyMenu(hMenu);
 
-        _ = AppendMenuA(hMenu, MF_STRING, MENU_ID_SETTINGS, "Settings...");
-        _ = AppendMenuA(hMenu, MF_STRING, MENU_ID_CONVERT, "Convert (F10)");
-        _ = AppendMenuA(hMenu, MF_STRING, MENU_ID_EXIT, "Exit");
+        var b1: [64]u16 = undefined;
+        var b2: [64]u16 = undefined;
+        const settingsW = wideBuf(&b1, lang.t("Settings...", "تنظیمات..."));
+        const exitW = wideBuf(&b2, lang.t("Exit", "خروج"));
+
+        _ = AppendMenuW(hMenu, MF_STRING, MENU_ID_SETTINGS, settingsW);
+        _ = AppendMenuW(hMenu, MF_STRING, MENU_ID_EXIT, exitW);
 
         _ = SetForegroundWindow(self.hWnd);
-        const cmd = TrackPopupMenu(
-            hMenu,
-            TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_BOTTOMALIGN,
-            x,
-            y,
-            0,
-            self.hWnd,
-            null,
-        );
-        // ✅ اصلاح باگ معروف: PostMessage برای بستن خودکار منو
+        const cmd = TrackPopupMenu(hMenu, TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_BOTTOMALIGN, x, y, 0, self.hWnd, null);
         _ = PostMessageW(self.hWnd, 0, 0, 0);
         if (cmd <= 0) return 0;
         return @intCast(cmd);
