@@ -1,4 +1,5 @@
 const std = @import("std");
+const DWORD = windows.DWORD
 const windows = std.os.windows;
 
 pub const MOD_ALT: u32 = 0x0001;
