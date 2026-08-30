@@ -56,6 +56,27 @@ const NOTIFYICONDATAW = extern struct {
 
 const tipW = std.unicode.utf8ToUtf16LeStringLiteral("LangReplace");
 
+// ✅ تبدیل دستی UTF-8 به UTF-16 (بدون وابستگی به API خاص)
+fn copyUtf8ToUtf16(dest: []u16, source: []const u8) usize {
+    var di: usize = 0;
+    var view = std.unicode.Utf8View.init(source) catch return 0;
+    var it = view.iterator();
+    while (it.nextCodepoint()) |cp| {
+        if (cp < 0x10000) {
+            if (di >= dest.len) break;
+            dest[di] = @intCast(cp);
+            di += 1;
+        } else {
+            if (di + 1 >= dest.len) break;
+            const v = cp - 0x10000;
+            dest[di] = @intCast(0xD800 + (v >> 10));
+            dest[di + 1] = @intCast(0xDC00 + (v & 0x3FF));
+            di += 2;
+        }
+    }
+    return di;
+}
+
 pub const TrayManager = struct {
     hWnd: HWND,
     nid: NOTIFYICONDATAW,
@@ -77,7 +98,6 @@ pub const TrayManager = struct {
         return TrayManager{ .hWnd = hWnd, .nid = nid };
     }
 
-    // ✅ حباب اعلان (بالون) با متن فارسی
     pub fn showBalloon(self: *TrayManager, title: []const u8, msg: []const u8) void {
         var nid = self.nid;
         nid.uFlags = NIF_INFO;
@@ -85,8 +105,8 @@ pub const TrayManager = struct {
         nid.uTimeout = 2000;
         @memset(&nid.szInfo, 0);
         @memset(&nid.szInfoTitle, 0);
-        _ = std.unicode.utf8ToUtf16LeSlice(&nid.szInfoTitle, title) catch 0;
-        _ = std.unicode.utf8ToUtf16LeSlice(&nid.szInfo, msg) catch 0;
+        _ = copyUtf8ToUtf16(&nid.szInfoTitle, title);
+        _ = copyUtf8ToUtf16(&nid.szInfo, msg);
         _ = Shell_NotifyIconW(NIM_MODIFY, &nid);
     }
 
