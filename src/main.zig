@@ -81,11 +81,14 @@ const SW_HIDE: i32 = 0;
 const WS_OVERLAPPEDWINDOW: DWORD = 0x00CF0000;
 const CW_USEDEFAULT: i32 = @as(i32, @bitCast(@as(u32, 0x80000000)));
 
+// MB_ICONINFO | MB_SYSTEMMODAL | MB_SETFOREGROUND → همیشه روی همه پنجره‌ها
+const MB_TOP: UINT = 0x40 | 0x00001000 | 0x00010000;
+
 var g_hInstance: ?HINSTANCE = null;
 var g_tray: ?tray.TrayManager = null;
 var g_icon: ?HICON = null;
 
-const ConvertMode = enum { auto_detect, force_english, force_persian_case };
+const ConvertMode = enum { auto_detect, force_english };
 
 fn notify(msg: []const u8) void {
     if (g_tray) |*t| t.showBalloon("LangReplace", msg);
@@ -130,8 +133,23 @@ fn convertByMode(text: []const u8, mode: ConvertMode, allocator: std.mem.Allocat
             break :blk converter.convertText(text, layout, target, allocator) catch return null;
         },
         .force_english => converter.convertText(text, .persian, .english, allocator) catch return null,
-        .force_persian_case => converter.convertTextPreserveCase(text, .english, .persian, allocator) catch return null,
     };
+}
+
+// ✅ Shift+F10: تغییر بزرگی/کوچکی حروف (abc <-> ABC)
+fn swapCaseText(text: []const u8, allocator: std.mem.Allocator) ![]u8 {
+    var out = std.ArrayList(u8).init(allocator);
+    errdefer out.deinit();
+    for (text) |b| {
+        if (b >= 'a' and b <= 'z') {
+            try out.append(b - 32);
+        } else if (b >= 'A' and b <= 'Z') {
+            try out.append(b + 32);
+        } else {
+            try out.append(b);
+        }
+    }
+    return out.toOwnedSlice();
 }
 
 fn readLineNow(allocator: std.mem.Allocator) ?[]u8 {
@@ -147,6 +165,14 @@ fn writeOverSelection(converted: []const u8, allocator: std.mem.Allocator) void 
     keyboard.deleteSelection();
     std.time.sleep(20 * std.time.ns_per_ms);
     keyboard.typeUnicodeText(converted, allocator);
+}
+
+fn doConvert(id: hotkey.HotkeyId, text: []const u8, allocator: std.mem.Allocator) ?[]u8 {
+    if (id == .convert_case) {
+        return swapCaseText(text, allocator) catch return null;
+    }
+    const mode: ConvertMode = if (id == .convert_reverse) .force_english else .auto_detect;
+    return convertByMode(text, mode, allocator);
 }
 
 fn handleHotkey(id: hotkey.HotkeyId) void {
@@ -180,21 +206,35 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
 
             const bodyW = toWideZ(allocator, result) orelse return;
             defer allocator.free(bodyW);
-            _ = MessageBoxW(null, bodyW, translateTitleW, 0x40);
+            _ = MessageBoxW(null, bodyW, translateTitleW, MB_TOP);
             return;
         },
-        .qr_code => return,
+        // ✅ Ctrl+M: تولید QR Code و نمایش در مرورگر
+        .qr_code => {
+            logWrite("=== Ctrl+M QR ===");
+            const text = readLineNow(allocator) orelse {
+                notify("✗ متنی برای QR پیدا نشد");
+                return;
+            };
+            defer allocator.free(text);
+            keyboard.collapseSelection();
+            if (text.len == 0) return;
+
+            const q = translate.urlEncode(allocator, text) catch return;
+            defer allocator.free(q);
+            const url = std.fmt.allocPrint(
+                allocator,
+                "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={s}",
+                .{q},
+            ) catch return;
+            defer allocator.free(url);
+            _ = search.openUrl(url, allocator);
+            return;
+        },
         else => {},
     }
 
-    const mode: ConvertMode = switch (id) {
-        .convert => .auto_detect,
-        .convert_reverse => .force_english,
-        .convert_case => .force_persian_case,
-        else => unreachable,
-    };
-
-    logWrite("=== F10 pressed ===");
+    logWrite("=== convert pressed ===");
 
     const text = readLineNow(allocator) orelse {
         keyboard.selectPreviousWord();
@@ -207,7 +247,7 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
                 defer allocator.free(t);
                 logWrite("PATH-WORD");
                 if (t.len == 0) return;
-                const converted = convertByMode(t, mode, allocator) orelse return;
+                const converted = doConvert(id, t, allocator) orelse return;
                 defer allocator.free(converted);
                 if (std.mem.eql(u8, converted, t)) return;
                 writeOverSelection(converted, allocator);
@@ -229,7 +269,7 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
         return;
     }
 
-    const converted = convertByMode(text, mode, allocator) orelse return;
+    const converted = doConvert(id, text, allocator) orelse return;
     defer allocator.free(converted);
 
     if (std.mem.eql(u8, converted, text)) {
