@@ -10,6 +10,7 @@ const LPARAM = windows.LPARAM;
 const LRESULT = windows.LRESULT;
 const HINSTANCE = windows.HINSTANCE;
 const BOOL = windows.BOOL;
+const DWORD = windows.DWORD
 
 const BTN_CHANGE_BASE: usize = 2101;
 const ID_CHK_UPPER: usize = 2001;
