@@ -1,48 +1,123 @@
 const std = @import("std");
 
+pub const MOD_ALT: u32 = 0x0001;
+pub const MOD_CONTROL: u32 = 0x0002;
+pub const MOD_SHIFT: u32 = 0x0004;
+
+pub const Hotkey = struct { mod: u32 = 0, vk: u32 = 0 };
+
 pub const Config = struct {
     ignore_upper_case: bool = true,
     ignore_english: bool = true,
     enable_middle_mouse: bool = false,
-    hotkey_convert: u32 = 0x79, // F10
-    hotkey_reverse: u32 = 0x75, // F6
-    hotkey_case: u32 = 0x79, // F10 with Shift
-
-    pub fn load(allocator: std.mem.Allocator) !Config {
-        const config_path = getConfigPath();
-        const file = std.fs.cwd().openFile(config_path, .{}) catch {
-            return Config{};
-        };
-        defer file.close();
-
-        const content = file.readToEndAlloc(allocator, 1024) catch {
-            return Config{};
-        };
-        defer allocator.free(content);
-
-        // پارس کردن JSON ساده
-        var config = Config{};
-        // در نسخه کامل از std.json استفاده می‌کنیم
-        
-        return config;
-    }
-
-    pub fn save(self: Config, allocator: std.mem.Allocator) !void {
-        const config_path = getConfigPath();
-        const file = std.fs.cwd().createFile(config_path, .{}) catch return;
-        defer file.close();
-
-        // نوشتن JSON ساده
-        const json = std.fmt.allocPrint(allocator, "{{\"ignore_upper_case\":{s},\"ignore_english\":{s}}}", .{
-            if (self.ignore_upper_case) "true" else "false",
-            if (self.ignore_english) "true" else "false",
-        }) catch return;
-        defer allocator.free(json);
-
-        _ = file.write(json);
-    }
-
-    fn getConfigPath() []const u8 {
-        return "langreplace_config.json";
-    }
+    hk_convert: Hotkey = .{ .mod = 0, .vk = 0x79 },
+    hk_reverse: Hotkey = .{ .mod = 0, .vk = 0x75 },
+    hk_case: Hotkey = .{ .mod = MOD_SHIFT, .vk = 0x79 },
+    hk_search: Hotkey = .{ .mod = MOD_CONTROL, .vk = 0x47 },
+    hk_translate: Hotkey = .{ .mod = MOD_CONTROL, .vk = 0x54 },
+    hk_qr: Hotkey = .{ .mod = MOD_CONTROL, .vk = 0x4D },
 };
+
+pub var g_config: Config = .{};
+
+const FILE = "langreplace.cfg";
+
+fn boolStr(b: bool) []const u8 {
+    return if (b) "1" else "0";
+}
+
+pub fn save(cfg: Config, allocator: std.mem.Allocator) void {
+    const s = std.fmt.allocPrint(allocator,
+        \\ignore_upper_case={s}
+        \\ignore_english={s}
+        \\enable_middle_mouse={s}
+        \\hk_convert={d},{d}
+        \\hk_reverse={d},{d}
+        \\hk_case={d},{d}
+        \\hk_search={d},{d}
+        \\hk_translate={d},{d}
+        \\hk_qr={d},{d}
+        \\
+    , .{
+        boolStr(cfg.ignore_upper_case), boolStr(cfg.ignore_english), boolStr(cfg.enable_middle_mouse),
+        cfg.hk_convert.mod,  cfg.hk_convert.vk,
+        cfg.hk_reverse.mod,  cfg.hk_reverse.vk,
+        cfg.hk_case.mod,     cfg.hk_case.vk,
+        cfg.hk_search.mod,   cfg.hk_search.vk,
+        cfg.hk_translate.mod, cfg.hk_translate.vk,
+        cfg.hk_qr.mod,       cfg.hk_qr.vk,
+    }) catch return;
+    defer allocator.free(s);
+    var f = std.fs.cwd().createFile(FILE, .{}) catch return;
+    defer f.close();
+    f.writeAll(s) catch return;
+}
+
+fn parseHotkey(line: []const u8) Hotkey {
+    var it = std.mem.splitScalar(u8, line, ',');
+    const m = it.next() orelse return .{};
+    const v = it.next() orelse return .{};
+    return Hotkey{
+        .mod = std.fmt.parseInt(u32, m, 10) catch 0,
+        .vk = std.fmt.parseInt(u32, v, 10) catch 0,
+    };
+}
+
+pub fn load(allocator: std.mem.Allocator) Config {
+    var cfg = Config{};
+    const content = std.fs.cwd().readFileAlloc(allocator, FILE, 100000) catch return cfg;
+    defer allocator.free(content);
+
+    var it = std.mem.splitScalar(u8, content, '\n');
+    while (it.next()) |raw| {
+        const line = std.mem.trim(u8, raw, "\r \t");
+        if (std.mem.startsWith(u8, line, "ignore_upper_case=")) {
+            cfg.ignore_upper_case = !std.mem.endsWith(u8, line, "=0");
+        } else if (std.mem.startsWith(u8, line, "ignore_english=")) {
+            cfg.ignore_english = !std.mem.endsWith(u8, line, "=0");
+        } else if (std.mem.startsWith(u8, line, "enable_middle_mouse=")) {
+            cfg.enable_middle_mouse = !std.mem.endsWith(u8, line, "=0");
+        } else if (std.mem.startsWith(u8, line, "hk_convert=")) {
+            cfg.hk_convert = parseHotkey(line["hk_convert=".len..]);
+        } else if (std.mem.startsWith(u8, line, "hk_reverse=")) {
+            cfg.hk_reverse = parseHotkey(line["hk_reverse=".len..]);
+        } else if (std.mem.startsWith(u8, line, "hk_case=")) {
+            cfg.hk_case = parseHotkey(line["hk_case=".len..]);
+        } else if (std.mem.startsWith(u8, line, "hk_search=")) {
+            cfg.hk_search = parseHotkey(line["hk_search=".len..]);
+        } else if (std.mem.startsWith(u8, line, "hk_translate=")) {
+            cfg.hk_translate = parseHotkey(line["hk_translate=".len..]);
+        } else if (std.mem.startsWith(u8, line, "hk_qr=")) {
+            cfg.hk_qr = parseHotkey(line["hk_qr=".len..]);
+        }
+    }
+    return cfg;
+}
+
+fn vkName(vk: u32) []const u8 {
+    if (vk >= 0x70 and vk <= 0x7B) {
+        const names = [_][]const u8{ "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12" };
+        return names[vk - 0x70];
+    }
+    if (vk >= 0x41 and vk <= 0x5A) return "Key";
+    if (vk >= 0x30 and vk <= 0x39) return "Num";
+    return "Key";
+}
+
+pub fn hotkeyLabel(cfg: Hotkey, allocator: std.mem.Allocator) []u8 {
+    var parts = std.ArrayList(u8).init(allocator);
+    if (cfg.mod & MOD_CONTROL != 0) parts.appendSlice("Ctrl+") catch return @constCast("");
+    if (cfg.mod & MOD_SHIFT != 0) parts.appendSlice("Shift+") catch return @constCast("");
+    if (cfg.mod & MOD_ALT != 0) parts.appendSlice("Alt+") catch return @constCast("");
+
+    if (cfg.vk >= 0x70 and cfg.vk <= 0x7B) {
+        parts.appendSlice(vkName(cfg.vk)) catch return @constCast("");
+    } else if (cfg.vk >= 0x41 and cfg.vk <= 0x5A) {
+        parts.append(@intCast('A' + (cfg.vk - 0x41))) catch return @constCast("");
+    } else if (cfg.vk >= 0x30 and cfg.vk <= 0x39) {
+        parts.append(@intCast('0' + (cfg.vk - 0x30))) catch return @constCast("");
+    } else {
+        parts.appendSlice("Key") catch return @constCast("");
+    }
+    return parts.toOwnedSlice() catch return @constCast("");
+}
