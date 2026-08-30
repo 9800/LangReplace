@@ -18,7 +18,6 @@ const VK_RIGHT: u16 = 0x27;
 const VK_DELETE: u16 = 0x2E;
 
 pub const VK_C: u16 = 0x43;
-pub const VK_V: u16 = 0x56;
 
 const MOUSEINPUT = extern struct { dx: i32, dy: i32, mouseData: DWORD, dwFlags: DWORD, time: DWORD, dwExtraInfo: usize };
 const KEYBDINPUT = extern struct { wVk: u16, wScan: u16, dwFlags: DWORD, time: DWORD, dwExtraInfo: usize };
@@ -35,8 +34,8 @@ extern "user32" fn SendInput(cInputs: UINT, pInputs: *INPUT, cbSize: i32) callco
 
 fn isExtendedKey(vk: u16) bool {
     return switch (vk) {
-        0x21...0x28 => true, // PRIOR NEXT END HOME LEFT UP RIGHT DOWN
-        0x2D, 0x2E => true, // INSERT DELETE
+        0x21...0x28 => true,
+        0x2D, 0x2E => true,
         else => false,
     };
 }
@@ -93,23 +92,13 @@ pub fn collapseSelection() void {
     _ = SendInput(2, &inputs[0], @sizeOf(INPUT));
 }
 
-pub fn moveHome() void {
+// ✅ حذف متن انتخاب‌شده (جایگزین Ctrl+V برای نوشتن)
+pub fn deleteSelection() void {
     var inputs: [2]INPUT = .{
-        keyInput(VK_HOME, 0),
-        keyInput(VK_HOME, KEYEVENTF_KEYUP),
+        keyInput(VK_DELETE, 0),
+        keyInput(VK_DELETE, KEYEVENTF_KEYUP),
     };
     _ = SendInput(2, &inputs[0], @sizeOf(INPUT));
-}
-
-pub fn deleteChars(n: usize) void {
-    var i: usize = 0;
-    while (i < n) : (i += 1) {
-        var inputs: [2]INPUT = .{
-            keyInput(VK_DELETE, 0),
-            keyInput(VK_DELETE, KEYEVENTF_KEYUP),
-        };
-        _ = SendInput(2, &inputs[0], @sizeOf(INPUT));
-    }
 }
 
 pub fn typeUnicodeText(text: []const u8, allocator: std.mem.Allocator) void {
