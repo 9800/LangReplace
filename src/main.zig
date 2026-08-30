@@ -17,10 +17,7 @@ const HINSTANCE = windows.HINSTANCE;
 const DWORD = windows.DWORD;
 const BOOL = windows.BOOL;
 
-const POINT = extern struct {
-    x: i32,
-    y: i32,
-};
+const POINT = extern struct { x: i32, y: i32 };
 
 const MSG = extern struct {
     hwnd: ?HWND,
@@ -40,10 +37,7 @@ extern "user32" fn CreateWindowExW(
     lpClassName: windows.LPCWSTR,
     lpWindowName: windows.LPCWSTR,
     dwStyle: DWORD,
-    X: i32,
-    Y: i32,
-    nWidth: i32,
-    nHeight: i32,
+    X: i32, Y: i32, nWidth: i32, nHeight: i32,
     hWndParent: ?HWND,
     hMenu: ?windows.HMENU,
     hInstance: ?HINSTANCE,
@@ -83,11 +77,11 @@ const CW_USEDEFAULT: i32 = @as(i32, @bitCast(@as(u32, 0x80000000)));
 var g_hInstance: ?HINSTANCE = null;
 var g_tray: ?tray.TrayManager = null;
 
-const ConvertMode = enum {
-    auto_detect,
-    force_english,
-    force_persian_case,
-};
+const ConvertMode = enum { auto_detect, force_english, force_persian_case };
+
+fn notify(title: []const u8, msg: []const u8) void {
+    if (g_tray) |*t| t.showBalloon(title, msg);
+}
 
 fn waitForClipboardChange(old_seq: DWORD) bool {
     var i: u32 = 0;
@@ -114,6 +108,15 @@ fn utf16Len(text: []const u8, allocator: std.mem.Allocator) usize {
     const units = std.unicode.utf8ToUtf16LeAlloc(allocator, text) catch return 0;
     defer allocator.free(units);
     return units.len;
+}
+
+fn replaceLineInPlace(old_text: []const u8, new_text: []const u8, allocator: std.mem.Allocator) void {
+    const old_len = utf16Len(old_text, allocator);
+    keyboard.moveHome();
+    std.time.sleep(20 * std.time.ns_per_ms);
+    keyboard.deleteChars(old_len);
+    std.time.sleep(20 * std.time.ns_per_ms);
+    keyboard.typeUnicodeText(new_text, allocator);
 }
 
 fn handleHotkey(id: hotkey.HotkeyId) void {
@@ -146,54 +149,76 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
         else => unreachable,
     };
 
-    // ===== حالت A: متن انتخاب‌شده وجود داره (هر برنامه‌ای) =====
+    // ===== مسیر ۱: اگه از قبل متنی انتخاب‌شده باشه =====
     const seqA = clipboard.getSequence();
     keyboard.simulateCtrlCombo(keyboard.VK_C);
     if (waitForClipboardChange(seqA)) {
         const text = clipboard.getClipboardText(allocator) catch return;
         if (text) |t| {
             defer allocator.free(t);
-            if (t.len == 0) return;
-            const converted = convertByMode(t, mode, allocator) orelse return;
-            defer allocator.free(converted);
-            if (std.mem.eql(u8, converted, t)) return; // هیچ تغییری لازم نیست
-            _ = clipboard.setClipboardText(converted);
-            std.time.sleep(50 * std.time.ns_per_ms);
-            keyboard.simulateCtrlCombo(keyboard.VK_V);
-            return;
+            if (t.len > 0) {
+                const converted = convertByMode(t, mode, allocator) orelse return;
+                defer allocator.free(converted);
+                if (!std.mem.eql(u8, converted, t)) {
+                    _ = clipboard.setClipboardText(converted);
+                    std.time.sleep(50 * std.time.ns_per_ms);
+                    keyboard.simulateCtrlCombo(keyboard.VK_V);
+                    notify("LangReplace", "تبدیل انجام شد ✓");
+                }
+                return;
+            }
         }
         return;
     }
 
-    // ===== حالت B: بدون انتخاب → انتخاب خودکار خط جاری (ادیتورها) =====
+    // ===== مسیر ۲: بدون انتخاب → خط جاری =====
     keyboard.selectCurrentLine();
     std.time.sleep(30 * std.time.ns_per_ms);
-
     const seqB = clipboard.getSequence();
     keyboard.simulateCtrlCombo(keyboard.VK_C);
-    if (!waitForClipboardChange(seqB)) {
+    if (waitForClipboardChange(seqB)) {
+        const text = clipboard.getClipboardText(allocator) catch return;
+        if (text) |t| {
+            defer allocator.free(t);
+            if (t.len > 0) {
+                const converted = convertByMode(t, mode, allocator) orelse return;
+                defer allocator.free(converted);
+                replaceLineInPlace(t, converted, allocator);
+                notify("LangReplace", "تبدیل انجام شد ✓");
+                return;
+            }
+        }
         keyboard.collapseSelection();
         return;
     }
 
-    const text = clipboard.getClipboardText(allocator) catch return;
-    if (text) |t| {
-        defer allocator.free(t);
-        if (t.len == 0) {
-            keyboard.collapseSelection();
-            return;
+    // ===== مسیر ۳: بدون انتخاب → کلمه قبلی =====
+    keyboard.selectPreviousWord();
+    std.time.sleep(30 * std.time.ns_per_ms);
+    const seqC = clipboard.getSequence();
+    keyboard.simulateCtrlCombo(keyboard.VK_C);
+    if (waitForClipboardChange(seqC)) {
+        const text = clipboard.getClipboardText(allocator) catch return;
+        if (text) |t| {
+            defer allocator.free(t);
+            if (t.len > 0) {
+                const converted = convertByMode(t, mode, allocator) orelse return;
+                defer allocator.free(converted);
+                if (!std.mem.eql(u8, converted, t)) {
+                    _ = clipboard.setClipboardText(converted);
+                    std.time.sleep(50 * std.time.ns_per_ms);
+                    keyboard.simulateCtrlCombo(keyboard.VK_V);
+                    notify("LangReplace", "تبدیل انجام شد ✓");
+                }
+                return;
+            }
         }
-
-        const converted = convertByMode(t, mode, allocator) orelse return;
-        defer allocator.free(converted);
-
-        const old_len = utf16Len(t, allocator);
-        keyboard.moveHome();
-        std.time.sleep(20 * std.time.ns_per_ms);
-        keyboard.deleteChars(old_len);
-        std.time.sleep(20 * std.time.ns_per_ms);
-        keyboard.typeUnicodeText(converted, allocator);
+        return;
     }
+
+    // ===== هیچ متنی پیدا نشد =====
+    keyboard.collapseSelection();
+    notify("LangReplace", "متنی برای تبدیل پیدا نشد");
 }
 
 fn handleMenuCommand(cmd: usize, hWnd: HWND) void {
@@ -263,18 +288,9 @@ pub fn main() !void {
     _ = RegisterClassExW(&wc);
 
     const hWnd = CreateWindowExW(
-        0,
-        classNameW,
-        windowNameW,
-        WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        null,
-        null,
-        g_hInstance,
-        null,
+        0, classNameW, windowNameW, WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+        null, null, g_hInstance, null,
     ) orelse return error.WindowCreationFailed;
 
     g_tray = try tray.TrayManager.init(hWnd);
