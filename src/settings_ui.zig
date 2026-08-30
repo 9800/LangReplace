@@ -233,7 +233,8 @@ fn colorMessages(Msg: UINT, wParam: WPARAM, lParam: LPARAM) ?LRESULT {
             return @as(LRESULT, @intCast(@intFromPtr(bg_brush)));
         },
         WM_DRAWITEM => {
-            const dis: *DRAWITEMSTRUCT = @ptrFromInt(lParam);
+            // ✅ تبدیل امن isize به usize
+            const dis: *DRAWITEMSTRUCT = @ptrFromInt(@as(usize, @bitCast(lParam)));
             if (dis.hDC) |dc| {
                 const id = dis.CtlID;
                 const fill = if (id == ID_OK) COL_OK else if (id == ID_LANG) COL_LANG else if (id == ID_PICK_FA) COL_BTN else if (id == ID_PICK_EN) COL_LANG else COL_BTN;
