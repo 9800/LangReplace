@@ -1,4 +1,5 @@
 const std = @import("std");
+const windows = std.os.windows;
 
 pub const MOD_ALT: u32 = 0x0001;
 pub const MOD_CONTROL: u32 = 0x0002;
@@ -21,10 +22,30 @@ pub const Config = struct {
 
 pub var g_config: Config = .{};
 
-const FILE = "langreplace.cfg";
+extern "kernel32" fn GetModuleFileNameW(h: ?windows.HMODULE, p: [*]u16, n: DWORD) callconv(windows.WINAPI) DWORD;
+
+// ✅ مسیر فایل تنظیمات کنار خود exe
+fn cfgPath(allocator: std.mem.Allocator) []const u8 {
+    var buf: [4096]u16 = undefined;
+    const len = GetModuleFileNameW(null, &buf, buf.len);
+    if (len == 0 or len >= buf.len) return "langreplace.cfg";
+
+    var last: usize = 0;
+    var i: usize = 0;
+    while (i < len) : (i += 1) {
+        if (buf[i] == '\\' or buf[i] == '/') last = i;
+    }
+    if (last == 0) return "langreplace.cfg";
+
+    const dirU8 = std.unicode.utf16LeToUtf8Alloc(allocator, buf[0..last]) catch return "langreplace.cfg";
+    defer allocator.free(dirU8);
+    return std.fmt.allocPrint(allocator, "{s}\\langreplace.cfg", .{dirU8}) catch "langreplace.cfg";
+}
 
 pub fn fileExists() bool {
-    std.fs.cwd().access(FILE, .{}) catch return false;
+    const allocator = std.heap.page_allocator;
+    const p = cfgPath(allocator);
+    std.fs.cwd().access(p, .{}) catch return false;
     return true;
 }
 
@@ -33,6 +54,7 @@ fn boolStr(b: bool) []const u8 {
 }
 
 pub fn save(cfg: Config, allocator: std.mem.Allocator) void {
+    const p = cfgPath(allocator);
     const s = std.fmt.allocPrint(allocator,
         \\language={d}
         \\ignore_upper_case={s}
@@ -56,7 +78,7 @@ pub fn save(cfg: Config, allocator: std.mem.Allocator) void {
         cfg.hk_qr.mod,       cfg.hk_qr.vk,
     }) catch return;
     defer allocator.free(s);
-    var f = std.fs.cwd().createFile(FILE, .{}) catch return;
+    var f = std.fs.cwd().createFile(p, .{}) catch return;
     defer f.close();
     f.writeAll(s) catch return;
 }
@@ -73,7 +95,8 @@ fn parseHotkey(line: []const u8) Hotkey {
 
 pub fn load(allocator: std.mem.Allocator) Config {
     var cfg = Config{};
-    const content = std.fs.cwd().readFileAlloc(allocator, FILE, 100000) catch return cfg;
+    const p = cfgPath(allocator);
+    const content = std.fs.cwd().readFileAlloc(allocator, p, 100000) catch return cfg;
     defer allocator.free(content);
 
     var it = std.mem.splitScalar(u8, content, '\n');
