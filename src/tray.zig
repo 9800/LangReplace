@@ -37,6 +37,7 @@ const TPM_RETURNCMD: UINT = 0x0080;
 const TPM_BOTTOMALIGN: UINT = 0x0020;
 
 pub const MENU_ID_SETTINGS: UINT_PTR = 1001;
+pub const MENU_ID_ABOUT: UINT_PTR = 1002;
 pub const MENU_ID_EXIT: UINT_PTR = 1003;
 
 const GUID = extern struct { a: u32, b: u16, c: u16, d: [8]u8 };
@@ -120,17 +121,19 @@ pub const TrayManager = struct {
         _ = Shell_NotifyIconW(NIM_MODIFY, &nid);
     }
 
-    // ✅ بدون گزینه Convert + متن دوزبانه
     pub fn showContextMenu(self: *TrayManager, x: i32, y: i32) UINT_PTR {
         const hMenu = CreatePopupMenu() orelse return 0;
         defer _ = DestroyMenu(hMenu);
 
         var b1: [64]u16 = undefined;
         var b2: [64]u16 = undefined;
+        var b3: [64]u16 = undefined;
         const settingsW = wideBuf(&b1, lang.t("Settings...", "تنظیمات..."));
-        const exitW = wideBuf(&b2, lang.t("Exit", "خروج"));
+        const aboutW = wideBuf(&b2, lang.t("About", "درباره"));
+        const exitW = wideBuf(&b3, lang.t("Exit", "خروج"));
 
         _ = AppendMenuW(hMenu, MF_STRING, MENU_ID_SETTINGS, settingsW);
+        _ = AppendMenuW(hMenu, MF_STRING, MENU_ID_ABOUT, aboutW);
         _ = AppendMenuW(hMenu, MF_STRING, MENU_ID_EXIT, exitW);
 
         _ = SetForegroundWindow(self.hWnd);
