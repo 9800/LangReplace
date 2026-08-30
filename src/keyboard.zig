@@ -33,11 +33,10 @@ const INPUT = extern struct {
 
 extern "user32" fn SendInput(cInputs: UINT, pInputs: *INPUT, cbSize: i32) callconv(windows.WINAPI) UINT;
 
-// ✅ کلیدهای Extended (مثل کیبورد واقعی)
 fn isExtendedKey(vk: u16) bool {
     return switch (vk) {
-        0x21...0x28, // PRIOR NEXT END HOME LEFT UP RIGHT DOWN
-        0x2D, 0x2E, // INSERT DELETE
+        0x21...0x28 => true, // PRIOR NEXT END HOME LEFT UP RIGHT DOWN
+        0x2D, 0x2E => true, // INSERT DELETE
         else => false,
     };
 }
