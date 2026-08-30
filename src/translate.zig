@@ -31,7 +31,8 @@ pub fn urlEncode(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
     var out = std.ArrayList(u8).init(allocator);
     errdefer out.deinit();
     for (s) |b| {
-        if (std.ascii.isAlnum(b) or b == '-' or b == '_' or b == '.' or b == '~') {
+        // ✅ نام درست در Zig 0.13
+        if (std.ascii.isAlphanumeric(b) or b == '-' or b == '_' or b == '.' or b == '~') {
             try out.append(b);
         } else {
             try out.append('%');
@@ -57,7 +58,7 @@ fn httpGet(host: []const u8, path: []const u8, allocator: std.mem.Allocator) ?[]
     const hRequest = WinHttpOpenRequest(hConnect, getW, pathW, null, null, null, WINHTTP_FLAG_SECURE) orelse return null;
     defer _ = WinHttpCloseHandle(hRequest);
 
-    if (WinHttpSendRequest(hRequest, null, -1, null, 0, 0, 0) == 0) return null;
+    if (WinHttpSendRequest(hRequest, null, 0, null, 0, 0, 0) == 0) return null;
     if (WinHttpReceiveResponse(hRequest, null) == 0) return null;
 
     var out = std.ArrayList(u8).init(allocator);
