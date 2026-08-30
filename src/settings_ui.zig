@@ -11,7 +11,6 @@ const HINSTANCE = windows.HINSTANCE;
 const BOOL = windows.BOOL;
 
 const BTN_CHANGE_BASE: usize = 2101;
-const LBL_BASE: usize = 2201;
 const ID_CHK_UPPER: usize = 2001;
 const ID_CHK_ENG: usize = 2002;
 const ID_CHK_MOUSE: usize = 2003;
@@ -23,9 +22,8 @@ const BS_CHECKBOX: windows.DWORD = 0x3;
 const BS_PUSHBUTTON: windows.DWORD = 0x0;
 const WM_CLOSE: UINT = 0x0010;
 const WM_COMMAND: UINT = 0x0111;
-const WM_CREATE: UINT = 0x0001;
-const BM_GETCHECK: usize = 0x00F0;
-const BM_SETCHECK: usize = 0x00F1;
+const BM_GETCHECK: UINT = 0x00F0;
+const BM_SETCHECK: UINT = 0x00F1;
 const SW_SHOW: i32 = 5;
 
 extern "user32" fn RegisterClassExW(w: *const WNDCLASSEXW) callconv(windows.WINAPI) u16;
@@ -35,9 +33,8 @@ extern "user32" fn ShowWindow(hWnd: HWND, n: i32) callconv(windows.WINAPI) BOOL;
 extern "user32" fn UpdateWindow(hWnd: HWND) callconv(windows.WINAPI) BOOL;
 extern "user32" fn DestroyWindow(hWnd: HWND) callconv(windows.WINAPI) BOOL;
 extern "user32" fn SendMessageW(hWnd: HWND, Msg: UINT, w: WPARAM, l: LPARAM) callconv(windows.WINAPI) LRESULT;
-extern "user32" fn SetWindowTextW(hWnd: HWND, s: windows.LPCWSTR) callconv(windows.WINAPI) BOOL;
+extern "user32" fn SetWindowTextW(hWnd: HWND, s: [*:0]const u16) callconv(windows.WINAPI) BOOL;
 extern "user32" fn GetAsyncKeyState(v: i32) callconv(windows.WINAPI) i16;
-extern "user32" fn MessageBoxA(hWnd: ?HWND, t: windows.LPCSTR, c: windows.LPCSTR, u: UINT) callconv(windows.WINAPI) i32;
 
 const WNDCLASSEXW = extern struct {
     cbSize: UINT, style: UINT,
@@ -54,24 +51,21 @@ const stcClsW = std.unicode.utf8ToUtf16LeStringLiteral("STATIC");
 
 var g_hInst: ?HINSTANCE = null;
 var g_parent: ?HWND = null;
-var g_settingsWnd: ?HWND = null;
 var pending: config.Config = .{};
-var label_hwnds: [6]?HWND = .{null} ** 6;
-var capturing: i32 = -1;
+var label_hwnds: [6]?HWND = .{ null, null, null, null, null, null };
 
 fn down(v: i32) bool {
     return (@as(u16, @bitCast(GetAsyncKeyState(v))) & 0x8000) != 0;
 }
 
 fn captureHotkey() config.Hotkey {
-    // صبر تا رها شدن همه کلیدها
     var guard: u32 = 0;
     while (guard < 200) : (guard += 1) {
         if (!down(0x10) and !down(0x11) and !down(0x12)) break;
         std.time.sleep(10 * std.time.ns_per_ms);
     }
     while (true) {
-        if (down(0x1B)) return .{ .mod = 0, .vk = 0x1B }; // Escape = لغو
+        if (down(0x1B)) return .{ .mod = 0, .vk = 0x1B };
         var mod: u32 = 0;
         if (down(0x11)) mod |= config.MOD_CONTROL;
         if (down(0x10)) mod |= config.MOD_SHIFT;
@@ -107,15 +101,21 @@ fn getHotkeyPtr(i: usize) *config.Hotkey {
 fn refreshLabel(i: usize, allocator: std.mem.Allocator) void {
     const lbl = config.hotkeyLabel(getHotkeyPtr(i).*, allocator);
     defer allocator.free(lbl);
-    const w = std.unicode.utf8ToUtf16LeAlloc(std.heap.page_allocator, lbl) catch return;
-    defer std.heap.page_allocator.free(w);
+    const w = std.unicode.utf8ToUtf16LeAlloc(allocator, lbl) catch return;
+    defer allocator.free(w);
+    const z = allocator.alloc(u16, w.len + 1) catch return;
+    defer allocator.free(z);
+    @memcpy(z[0..w.len], w);
+    z[w.len] = 0;
+    const zs: [:0]u16 = z[0..w.len :0];
     if (label_hwnds[i]) |h| {
-        _ = SetWindowTextW(h, w.ptr);
+        _ = SetWindowTextW(h, zs);
     }
 }
 
 fn createControl(class: windows.LPCWSTR, text: windows.LPCWSTR, style: windows.DWORD, x: i32, y: i32, w: i32, h: i32, id: usize, parent: HWND) ?HWND {
-    return CreateWindowExW(0, class, text, WS_CHILD | WS_VISIBLE | style, x, y, w, h, parent, @ptrFromInt(id), g_hInst, null);
+    const hMenu: ?windows.HMENU = if (id == 0) null else @ptrFromInt(id);
+    return CreateWindowExW(0, class, text, WS_CHILD | WS_VISIBLE | style, x, y, w, h, parent, hMenu, g_hInst, null);
 }
 
 fn settingsProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT {
@@ -125,31 +125,26 @@ fn settingsProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(
             const id = wParam & 0xFFFF;
             if (id >= BTN_CHANGE_BASE and id < BTN_CHANGE_BASE + 6) {
                 const idx = id - BTN_CHANGE_BASE;
-                capturing = @intCast(idx);
                 const hk = captureHotkey();
-                capturing = -1;
                 if (hk.vk != 0x1B) {
                     getHotkeyPtr(idx).* = hk;
                     refreshLabel(idx, allocator);
                 }
                 return 0;
             }
-            switch (id) {
-                ID_OK => {
-                    pending.ignore_upper_case = (SendMessageW(hWnd, @intCast(ID_CHK_UPPER), BM_GETCHECK, 0) != 0);
-                    pending.ignore_english = (SendMessageW(hWnd, @intCast(ID_CHK_ENG), BM_GETCHECK, 0) != 0);
-                    pending.enable_middle_mouse = (SendMessageW(hWnd, @intCast(ID_CHK_MOUSE), BM_GETCHECK, 0) != 0);
-                    config.g_config = pending;
-                    config.save(pending, allocator);
-                    if (g_parent) |p| {
-                        const hotkey = @import("hotkey.zig");
-                        hotkey.unregisterHotkeys(p);
-                        _ = hotkey.registerHotkeys(p, pending);
-                    }
-                    _ = DestroyWindow(hWnd);
-                    return 0;
-                },
-                else => {},
+            if (id == ID_OK) {
+                pending.ignore_upper_case = (SendMessageW(@ptrFromInt(ID_CHK_UPPER), BM_GETCHECK, 0, 0) != 0);
+                pending.ignore_english = (SendMessageW(@ptrFromInt(ID_CHK_ENG), BM_GETCHECK, 0, 0) != 0);
+                pending.enable_middle_mouse = (SendMessageW(@ptrFromInt(ID_CHK_MOUSE), BM_GETCHECK, 0, 0) != 0);
+                config.g_config = pending;
+                config.save(pending, allocator);
+                if (g_parent) |p| {
+                    const hotkey = @import("hotkey.zig");
+                    hotkey.unregisterHotkeys(p);
+                    _ = hotkey.registerHotkeys(p, pending);
+                }
+                _ = DestroyWindow(hWnd);
+                return 0;
             }
             return 0;
         },
@@ -159,6 +154,10 @@ fn settingsProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(
         },
         else => return DefWindowProcW(hWnd, Msg, wParam, lParam),
     }
+}
+
+fn chkHwnd(id: usize) HWND {
+    return @ptrFromInt(id);
 }
 
 pub fn openSettings(hInst: ?HINSTANCE, parent: ?HWND) void {
@@ -176,9 +175,7 @@ pub fn openSettings(hInst: ?HINSTANCE, parent: ?HWND) void {
     _ = RegisterClassExW(&wc);
 
     const hWnd = CreateWindowExW(0, clsW, titleW, 0x00CF0000, 100, 100, 460, 420, parent, null, hInst, null) orelse return;
-    g_settingsWnd = hWnd;
 
-    // چک‌باکس‌ها
     const c1 = std.unicode.utf8ToUtf16LeStringLiteral("Ignore Upper case when converting");
     const c2 = std.unicode.utf8ToUtf16LeStringLiteral("Ignore English when reversing text");
     const c3 = std.unicode.utf8ToUtf16LeStringLiteral("Enable operation with mouse middle button");
@@ -186,11 +183,10 @@ pub fn openSettings(hInst: ?HINSTANCE, parent: ?HWND) void {
     _ = createControl(btnClsW, c2, BS_CHECKBOX, 20, 48, 400, 24, ID_CHK_ENG, hWnd);
     _ = createControl(btnClsW, c3, BS_CHECKBOX, 20, 76, 400, 24, ID_CHK_MOUSE, hWnd);
 
-    if (pending.ignore_upper_case) _ = SendMessageW(hWnd, ID_CHK_UPPER, BM_SETCHECK, 1);
-    if (pending.ignore_english) _ = SendMessageW(hWnd, ID_CHK_ENG, BM_SETCHECK, 1);
-    if (pending.enable_middle_mouse) _ = SendMessageW(hWnd, ID_CHK_MOUSE, BM_SETCHECK, 1);
+    if (pending.ignore_upper_case) _ = SendMessageW(chkHwnd(ID_CHK_UPPER), BM_SETCHECK, 1, 0);
+    if (pending.ignore_english) _ = SendMessageW(chkHwnd(ID_CHK_ENG), BM_SETCHECK, 1, 0);
+    if (pending.enable_middle_mouse) _ = SendMessageW(chkHwnd(ID_CHK_MOUSE), BM_SETCHECK, 1, 0);
 
-    // ردیف‌های Change Key
     const names = [_]windows.LPCWSTR{
         std.unicode.utf8ToUtf16LeStringLiteral("Convert  abc <-> FA"),
         std.unicode.utf8ToUtf16LeStringLiteral("Reverse  FA <-> abc"),
@@ -200,13 +196,14 @@ pub fn openSettings(hInst: ?HINSTANCE, parent: ?HWND) void {
         std.unicode.utf8ToUtf16LeStringLiteral("QR Code"),
     };
     const chW = std.unicode.utf8ToUtf16LeStringLiteral("Change Key");
+    const emptyW = std.unicode.utf8ToUtf16LeStringLiteral("");
 
     var i: usize = 0;
     while (i < 6) : (i += 1) {
         const y: i32 = @intCast(110 + i * 34);
         _ = createControl(btnClsW, chW, BS_PUSHBUTTON, 20, y, 100, 28, BTN_CHANGE_BASE + i, hWnd);
         _ = createControl(stcClsW, names[i], 0, 130, y + 5, 200, 22, 0, hWnd);
-        label_hwnds[i] = createControl(stcClsW, @ptrFromInt(0), 0, 340, y + 5, 90, 22, LBL_BASE + i, hWnd);
+        label_hwnds[i] = createControl(stcClsW, emptyW, 0, 340, y + 5, 90, 22, 3001 + i, hWnd);
         refreshLabel(i, allocator);
     }
 
