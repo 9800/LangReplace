@@ -1,5 +1,6 @@
 const std = @import("std");
 const windows = std.os.windows;
+const config = @import("config.zig");
 
 const HWND = windows.HWND;
 const UINT = windows.UINT;
@@ -8,8 +9,6 @@ const BOOL = windows.BOOL;
 extern "user32" fn RegisterHotKey(hWnd: ?HWND, id: i32, fsModifiers: UINT, vk: UINT) callconv(windows.WINAPI) BOOL;
 extern "user32" fn UnregisterHotKey(hWnd: ?HWND, id: i32) callconv(windows.WINAPI) BOOL;
 
-const MOD_CONTROL: UINT = 0x0002;
-const MOD_SHIFT: UINT = 0x0004;
 const MOD_NOREPEAT: UINT = 0x4000;
 
 pub const HotkeyId = enum(i32) {
@@ -21,13 +20,13 @@ pub const HotkeyId = enum(i32) {
     qr_code = 6,
 };
 
-pub fn registerHotkeys(hWnd: ?HWND) bool {
-    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.convert), MOD_NOREPEAT, 0x79); // F10
-    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.convert_reverse), MOD_NOREPEAT, 0x75); // F6
-    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.convert_case), MOD_SHIFT | MOD_NOREPEAT, 0x79); // Shift+F10
-    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.search_google), MOD_CONTROL | MOD_NOREPEAT, 0x47); // Ctrl+G
-    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.translate), MOD_CONTROL | MOD_NOREPEAT, 0x54); // Ctrl+T
-    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.qr_code), MOD_CONTROL | MOD_NOREPEAT, 0x4D); // Ctrl+M
+pub fn registerHotkeys(hWnd: ?HWND, cfg: config.Config) bool {
+    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.convert), @intCast(cfg.hk_convert.mod | MOD_NOREPEAT), @intCast(cfg.hk_convert.vk));
+    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.convert_reverse), @intCast(cfg.hk_reverse.mod | MOD_NOREPEAT), @intCast(cfg.hk_reverse.vk));
+    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.convert_case), @intCast(cfg.hk_case.mod | MOD_NOREPEAT), @intCast(cfg.hk_case.vk));
+    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.search_google), @intCast(cfg.hk_search.mod | MOD_NOREPEAT), @intCast(cfg.hk_search.vk));
+    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.translate), @intCast(cfg.hk_translate.mod | MOD_NOREPEAT), @intCast(cfg.hk_translate.vk));
+    _ = RegisterHotKey(hWnd, @intFromEnum(HotkeyId.qr_code), @intCast(cfg.hk_qr.mod | MOD_NOREPEAT), @intCast(cfg.hk_qr.vk));
     return true;
 }
 
