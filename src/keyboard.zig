@@ -16,6 +16,7 @@ const VK_RIGHT: u16 = 0x27;
 const VK_DELETE: u16 = 0x2E;
 
 pub const VK_C: u16 = 0x43;
+pub const VK_V: u16 = 0x56;
 
 const MOUSEINPUT = extern struct {
     dx: i32,
@@ -109,7 +110,6 @@ pub fn collapseSelection() void {
     _ = SendInput(2, &inputs[0], @sizeOf(INPUT));
 }
 
-// ✅ برو به اول خط جاری
 pub fn moveHome() void {
     var inputs: [2]INPUT = .{
         keyInput(VK_HOME, 0),
@@ -118,7 +118,6 @@ pub fn moveHome() void {
     _ = SendInput(2, &inputs[0], @sizeOf(INPUT));
 }
 
-// ✅ حذف n کاراکتر از اول خط
 pub fn deleteChars(n: usize) void {
     var i: usize = 0;
     while (i < n) : (i += 1) {
@@ -130,7 +129,6 @@ pub fn deleteChars(n: usize) void {
     }
 }
 
-// ✅ تایپ متن یونیکد (فارسی/انگلیسی) کاراکتر به کاراکتر
 pub fn typeUnicodeText(text: []const u8, allocator: std.mem.Allocator) void {
     const units = std.unicode.utf8ToUtf16LeAlloc(allocator, text) catch return;
     defer allocator.free(units);
