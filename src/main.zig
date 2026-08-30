@@ -120,12 +120,6 @@ fn convertByMode(text: []const u8, mode: ConvertMode, allocator: std.mem.Allocat
     };
 }
 
-fn utf16Len(text: []const u8, allocator: std.mem.Allocator) usize {
-    const units = std.unicode.utf8ToUtf16LeAlloc(allocator, text) catch return 0;
-    defer allocator.free(units);
-    return units.len;
-}
-
 fn readLineNow(allocator: std.mem.Allocator) ?[]u8 {
     keyboard.selectCurrentLine();
     std.time.sleep(30 * std.time.ns_per_ms);
@@ -135,82 +129,11 @@ fn readLineNow(allocator: std.mem.Allocator) ?[]u8 {
     return clipboard.getClipboardText(allocator) catch null;
 }
 
-// ✅ نوشتن هوشمند: Ctrl+V + بررسی + اصلاح خودکار در صورت الصاق
-fn smartWrite(old_text: []const u8, converted: []const u8, allocator: std.mem.Allocator) void {
-    _ = clipboard.setClipboardText(converted);
-    std.time.sleep(50 * std.time.ns_per_ms);
-    keyboard.simulateCtrlCombo(keyboard.VK_V);
-    std.time.sleep(150 * std.time.ns_per_ms);
-
-    if (std.mem.indexOfScalar(u8, converted, '\n') != null) {
-        logWrite("WRITE: multiline trusted");
-        notify("✓ تبدیل شد");
-        return;
-    }
-
-    const L = readLineNow(allocator) orelse {
-        logWrite("WRITE: verify null");
-        notify("✓ تبدیل شد");
-        return;
-    };
-    defer allocator.free(L);
-
-    if (std.mem.eql(u8, L, converted)) {
-        logWrite("WRITE: match");
-        notify("✓ تبدیل شد");
-        return;
-    }
-
-    const tc = std.fmt.allocPrint(allocator, "{s}{s}", .{ old_text, converted }) catch return;
-    defer allocator.free(tc);
-    const ct = std.fmt.allocPrint(allocator, "{s}{s}", .{ converted, old_text }) catch return;
-    defer allocator.free(ct);
-
-    if (std.mem.eql(u8, L, tc) or std.mem.eql(u8, L, ct)) {
-        logWrite("WRITE: appended -> fallback replace");
-        // خط الان انتخاب شده؛ دوباره paste کن تا کل خط جایگزین بشه
-        _ = clipboard.setClipboardText(converted);
-        std.time.sleep(50 * std.time.ns_per_ms);
-        keyboard.simulateCtrlCombo(keyboard.VK_V);
-        notify("✓ تبدیل شد (روش پشتیبان)");
-        return;
-    }
-
-    logWrite("WRITE: partial selection ok");
-    notify("✓ تبدیل شد");
-}
-
-fn replaceLineInPlace(old_text: []const u8, new_text: []const u8, allocator: std.mem.Allocator) void {
-    const old_len = utf16Len(old_text, allocator);
-    keyboard.moveHome();
+// ✅ نوشتن بدون Ctrl+V: حذف انتخاب + تایپ یونیکد
+fn writeOverSelection(converted: []const u8, allocator: std.mem.Allocator) void {
+    keyboard.deleteSelection();
     std.time.sleep(20 * std.time.ns_per_ms);
-    keyboard.deleteChars(old_len);
-    std.time.sleep(20 * std.time.ns_per_ms);
-    keyboard.typeUnicodeText(new_text, allocator);
-}
-
-fn verifiedReplace(old_text: []const u8, converted: []const u8, allocator: std.mem.Allocator) void {
-    replaceLineInPlace(old_text, converted, allocator);
-    std.time.sleep(150 * std.time.ns_per_ms);
-
-    const line_now = readLineNow(allocator) orelse {
-        logWrite("VERIFY: null");
-        notify("✓ تبدیل شد");
-        return;
-    };
-    defer allocator.free(line_now);
-
-    if (std.mem.eql(u8, line_now, converted)) {
-        logWrite("VERIFY: match");
-        notify("✓ تبدیل شد");
-        return;
-    }
-
-    logWrite("VERIFY: mismatch -> fallback");
-    _ = clipboard.setClipboardText(converted);
-    std.time.sleep(50 * std.time.ns_per_ms);
-    keyboard.simulateCtrlCombo(keyboard.VK_V);
-    notify("✓ تبدیل شد (روش پشتیبان)");
+    keyboard.typeUnicodeText(converted, allocator);
 }
 
 fn handleHotkey(id: hotkey.HotkeyId) void {
@@ -246,14 +169,13 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
         if (text) |t| {
             defer allocator.free(t);
             logWrite("PATH1");
-            if (t.len > 0) {
-                const converted = convertByMode(t, mode, allocator) orelse return;
-                defer allocator.free(converted);
-                if (!std.mem.eql(u8, converted, t)) {
-                    smartWrite(t, converted, allocator);
-                }
-                return;
-            }
+            if (t.len == 0) return;
+            const converted = convertByMode(t, mode, allocator) orelse return;
+            defer allocator.free(converted);
+            if (std.mem.eql(u8, converted, t)) return;
+            writeOverSelection(converted, allocator);
+            notify("✓ تبدیل شد");
+            return;
         }
         return;
     }
@@ -270,14 +192,13 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
             if (t3) |t| {
                 defer allocator.free(t);
                 logWrite("PATH3");
-                if (t.len > 0) {
-                    const converted = convertByMode(t, mode, allocator) orelse return;
-                    defer allocator.free(converted);
-                    if (!std.mem.eql(u8, converted, t)) {
-                        smartWrite(t, converted, allocator);
-                    }
-                    return;
-                }
+                if (t.len == 0) return;
+                const converted = convertByMode(t, mode, allocator) orelse return;
+                defer allocator.free(converted);
+                if (std.mem.eql(u8, converted, t)) return;
+                writeOverSelection(converted, allocator);
+                notify("✓ تبدیل شد");
+                return;
             }
         }
         keyboard.collapseSelection();
@@ -303,7 +224,28 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
         return;
     }
 
-    verifiedReplace(text, converted, allocator);
+    // خط الان انتخاب شده → حذف + تایپ
+    writeOverSelection(converted, allocator);
+    std.time.sleep(150 * std.time.ns_per_ms);
+
+    // بررسی نهایی
+    const line_now = readLineNow(allocator) orelse {
+        logWrite("VERIFY: null");
+        notify("✓ تبدیل شد");
+        return;
+    };
+    defer allocator.free(line_now);
+
+    if (std.mem.eql(u8, line_now, converted)) {
+        logWrite("VERIFY: match");
+        notify("✓ تبدیل شد");
+        return;
+    }
+
+    // اگه هنوز خرابه: خط (که الان انتخاب شده) رو دوباره حذف+تایپ کن
+    logWrite("VERIFY: mismatch -> rewrite");
+    writeOverSelection(converted, allocator);
+    notify("✓ تبدیل شد (روش پشتیبان)");
 }
 
 fn handleMenuCommand(cmd: usize, hWnd: HWND) void {
