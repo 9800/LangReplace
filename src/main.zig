@@ -52,7 +52,7 @@ extern "user32" fn DispatchMessageW(lpMsg: *const MSG) callconv(windows.WINAPI) 
 extern "user32" fn DefWindowProcW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT;
 extern "user32" fn PostQuitMessage(nExitCode: i32) callconv(windows.WINAPI) void;
 extern "user32" fn MessageBoxA(hWnd: ?HWND, lpText: windows.LPCSTR, lpCaption: windows.LPCSTR, uType: UINT) callconv(windows.WINAPI) i32;
-extern "user32" fn LoadIconW(hInstance: ?HINSTANCE, lpIconName: windows.LPCWSTR) callconv(windows.WINAPI) ?HICON;
+extern "user32" fn LoadIconW(hInstance: ?HINSTANCE, lpIconName: usize) callconv(windows.WINAPI) ?HICON;
 
 const WNDCLASSEXW = extern struct {
     cbSize: UINT,
