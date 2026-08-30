@@ -8,22 +8,25 @@ const HICON = windows.HICON;
 const BOOL = windows.BOOL;
 const UINT_PTR = usize;
 
-extern "shell32" fn Shell_NotifyIconA(dwMessage: DWORD, lpData: *NOTIFYICONDATAA) callconv(windows.WINAPI) BOOL;
-extern "user32" fn LoadIconA(hInstance: ?windows.HINSTANCE, lpIconName: windows.LPCSTR) callconv(windows.WINAPI) ?HICON;
+extern "shell32" fn Shell_NotifyIconW(dwMessage: DWORD, lpData: *NOTIFYICONDATAW) callconv(windows.WINAPI) BOOL;
+extern "user32" fn LoadIconW(hInstance: ?windows.HINSTANCE, lpIconName: windows.LPCWSTR) callconv(windows.WINAPI) ?HICON;
 extern "user32" fn CreatePopupMenu() callconv(windows.WINAPI) ?windows.HMENU;
 extern "user32" fn AppendMenuA(hMenu: windows.HMENU, uFlags: UINT, uIDNewItem: UINT_PTR, lpNewItem: windows.LPCSTR) callconv(windows.WINAPI) BOOL;
 extern "user32" fn TrackPopupMenu(hMenu: windows.HMENU, uFlags: UINT, x: i32, y: i32, nReserved: i32, hWnd: HWND, prcRect: ?*const windows.RECT) callconv(windows.WINAPI) BOOL;
 extern "user32" fn DestroyMenu(hMenu: windows.HMENU) callconv(windows.WINAPI) BOOL;
 extern "user32" fn SetForegroundWindow(hWnd: HWND) callconv(windows.WINAPI) BOOL;
 
-const NIM_ADD: DWORD = 0x00000000;
-const NIM_DELETE: DWORD = 0x00000002;
-const NIF_MESSAGE: UINT = 0x00000001;
-const NIF_ICON: UINT = 0x00000002;
-const NIF_TIP: UINT = 0x00000004;
+const NIM_ADD: DWORD = 0;
+const NIM_MODIFY: DWORD = 1;
+const NIM_DELETE: DWORD = 2;
+const NIF_MESSAGE: UINT = 1;
+const NIF_ICON: UINT = 2;
+const NIF_TIP: UINT = 4;
+const NIF_INFO: UINT = 0x10;
+const NIIF_INFO: DWORD = 1;
 const WM_USER: UINT = 0x0400;
 pub const WM_TRAYICON: UINT = WM_USER + 1;
-const MF_STRING: UINT = 0x00000000;
+const MF_STRING: UINT = 0;
 const TPM_RIGHTBUTTON: UINT = 0x0002;
 const TPM_RETURNCMD: UINT = 0x0080;
 
@@ -31,41 +34,60 @@ pub const MENU_ID_SETTINGS: UINT_PTR = 1001;
 pub const MENU_ID_CONVERT: UINT_PTR = 1002;
 pub const MENU_ID_EXIT: UINT_PTR = 1003;
 
-const NOTIFYICONDATAA = extern struct {
+const GUID = extern struct { a: u32, b: u16, c: u16, d: [8]u8 };
+
+const NOTIFYICONDATAW = extern struct {
     cbSize: DWORD,
     hWnd: HWND,
     uID: UINT,
     uFlags: UINT,
     uCallbackMessage: UINT,
     hIcon: ?HICON,
-    szTip: [64]u8,
+    szTip: [64]u16,
+    dwState: DWORD,
+    dwStateMask: DWORD,
+    szInfo: [256]u16,
+    uTimeout: DWORD,
+    szInfoTitle: [64]u16,
+    dwInfoFlags: DWORD,
+    guidItem: GUID,
+    hBalloonIcon: ?HICON,
 };
+
+const tipW = std.unicode.utf8ToUtf16LeStringLiteral("LangReplace");
 
 pub const TrayManager = struct {
     hWnd: HWND,
-    nid: NOTIFYICONDATAA,
+    nid: NOTIFYICONDATAW,
 
     pub fn init(hWnd: HWND) !TrayManager {
-        var nid: NOTIFYICONDATAA = undefined;
-        nid.cbSize = @sizeOf(NOTIFYICONDATAA);
+        var nid: NOTIFYICONDATAW = undefined;
+        const bytes: [*]u8 = @ptrCast(&nid);
+        @memset(bytes[0..@sizeOf(NOTIFYICONDATAW)], 0);
+
+        nid.cbSize = @sizeOf(NOTIFYICONDATAW);
         nid.hWnd = hWnd;
         nid.uID = 1;
         nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
         nid.uCallbackMessage = WM_TRAYICON;
-        // آیکون پیش‌فرض ویندوز (IDI_APPLICATION = 32512)
-        nid.hIcon = LoadIconA(null, @as(windows.LPCSTR, @ptrFromInt(32512)));
-        @memset(&nid.szTip, 0);
-        const tip = "LangReplace";
-        @memcpy(nid.szTip[0..tip.len], tip);
+        nid.hIcon = LoadIconW(null, @as(windows.LPCWSTR, @ptrFromInt(32512)));
+        @memcpy(nid.szTip[0..tipW.len], tipW);
 
-        if (Shell_NotifyIconA(NIM_ADD, &nid) == 0) {
-            return error.TrayIconFailed;
-        }
+        if (Shell_NotifyIconW(NIM_ADD, &nid) == 0) return error.TrayIconFailed;
+        return TrayManager{ .hWnd = hWnd, .nid = nid };
+    }
 
-        return TrayManager{
-            .hWnd = hWnd,
-            .nid = nid,
-        };
+    // ✅ حباب اعلان (بالون) با متن فارسی
+    pub fn showBalloon(self: *TrayManager, title: []const u8, msg: []const u8) void {
+        var nid = self.nid;
+        nid.uFlags = NIF_INFO;
+        nid.dwInfoFlags = NIIF_INFO;
+        nid.uTimeout = 2000;
+        @memset(&nid.szInfo, 0);
+        @memset(&nid.szInfoTitle, 0);
+        _ = std.unicode.utf8ToUtf16LeSlice(&nid.szInfoTitle, title) catch 0;
+        _ = std.unicode.utf8ToUtf16LeSlice(&nid.szInfo, msg) catch 0;
+        _ = Shell_NotifyIconW(NIM_MODIFY, &nid);
     }
 
     pub fn showContextMenu(self: *TrayManager, x: i32, y: i32) UINT_PTR {
@@ -83,6 +105,6 @@ pub const TrayManager = struct {
     }
 
     pub fn cleanup(self: *TrayManager) void {
-        _ = Shell_NotifyIconA(NIM_DELETE, &self.nid);
+        _ = Shell_NotifyIconW(NIM_DELETE, &self.nid);
     }
 };
