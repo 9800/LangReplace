@@ -7,6 +7,7 @@ pub const MOD_SHIFT: u32 = 0x0004;
 pub const Hotkey = struct { mod: u32 = 0, vk: u32 = 0 };
 
 pub const Config = struct {
+    language: u32 = 0, // 0=English, 1=Persian
     ignore_upper_case: bool = true,
     ignore_english: bool = true,
     enable_middle_mouse: bool = false,
@@ -22,12 +23,18 @@ pub var g_config: Config = .{};
 
 const FILE = "langreplace.cfg";
 
+pub fn fileExists() bool {
+    std.fs.cwd().access(FILE, .{}) catch return false;
+    return true;
+}
+
 fn boolStr(b: bool) []const u8 {
     return if (b) "1" else "0";
 }
 
 pub fn save(cfg: Config, allocator: std.mem.Allocator) void {
     const s = std.fmt.allocPrint(allocator,
+        \\language={d}
         \\ignore_upper_case={s}
         \\ignore_english={s}
         \\enable_middle_mouse={s}
@@ -39,6 +46,7 @@ pub fn save(cfg: Config, allocator: std.mem.Allocator) void {
         \\hk_qr={d},{d}
         \\
     , .{
+        cfg.language,
         boolStr(cfg.ignore_upper_case), boolStr(cfg.ignore_english), boolStr(cfg.enable_middle_mouse),
         cfg.hk_convert.mod,  cfg.hk_convert.vk,
         cfg.hk_reverse.mod,  cfg.hk_reverse.vk,
@@ -71,7 +79,9 @@ pub fn load(allocator: std.mem.Allocator) Config {
     var it = std.mem.splitScalar(u8, content, '\n');
     while (it.next()) |raw| {
         const line = std.mem.trim(u8, raw, "\r \t");
-        if (std.mem.startsWith(u8, line, "ignore_upper_case=")) {
+        if (std.mem.startsWith(u8, line, "language=")) {
+            cfg.language = std.fmt.parseInt(u32, line["language=".len..], 10) catch 0;
+        } else if (std.mem.startsWith(u8, line, "ignore_upper_case=")) {
             cfg.ignore_upper_case = !std.mem.endsWith(u8, line, "=0");
         } else if (std.mem.startsWith(u8, line, "ignore_english=")) {
             cfg.ignore_english = !std.mem.endsWith(u8, line, "=0");
@@ -99,8 +109,6 @@ fn vkName(vk: u32) []const u8 {
         const names = [_][]const u8{ "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12" };
         return names[vk - 0x70];
     }
-    if (vk >= 0x41 and vk <= 0x5A) return "Key";
-    if (vk >= 0x30 and vk <= 0x39) return "Num";
     return "Key";
 }
 
