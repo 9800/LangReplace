@@ -1,6 +1,7 @@
 const std = @import("std");
-const DWORD = windows.DWORD
 const windows = std.os.windows;
+
+const DWORD = windows.DWORD;
 
 pub const MOD_ALT: u32 = 0x0001;
 pub const MOD_CONTROL: u32 = 0x0002;
@@ -25,7 +26,6 @@ pub var g_config: Config = .{};
 
 extern "kernel32" fn GetModuleFileNameW(h: ?windows.HMODULE, p: [*]u16, n: DWORD) callconv(windows.WINAPI) DWORD;
 
-// ✅ مسیر فایل تنظیمات کنار خود exe
 fn cfgPath(allocator: std.mem.Allocator) []const u8 {
     var buf: [4096]u16 = undefined;
     const len = GetModuleFileNameW(null, &buf, buf.len);
