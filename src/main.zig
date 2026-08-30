@@ -130,13 +130,18 @@ fn convertByMode(text: []const u8, force_english: bool, allocator: std.mem.Alloc
     return converter.convertText(text, layout, target, allocator) catch null;
 }
 
+// ✅ تغییر بزرگی/کوچکی حروف (abc <-> ABC)
 fn swapCaseText(text: []const u8, allocator: std.mem.Allocator) ![]u8 {
     var out = std.ArrayList(u8).init(allocator);
     errdefer out.deinit();
     for (text) |b| {
-        if (b >= 'a' and b <= 'z') try out.append(b - 32);
-        else if (b >= 'A' and b <= 'Z') try out.append(b + 32);
-        else try out.append(b);
+        if (b >= 'a' and b <= 'z') {
+            try out.append(b - 32);
+        } else if (b >= 'A' and b <= 'Z') {
+            try out.append(b + 32);
+        } else {
+            try out.append(b);
+        }
     }
     return out.toOwnedSlice();
 }
