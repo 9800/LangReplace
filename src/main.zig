@@ -10,6 +10,7 @@ const keyboard = @import("keyboard.zig");
 const translate = @import("translate.zig");
 const config = @import("config.zig");
 const settings_ui = @import("settings_ui.zig");
+const lang = @import("lang.zig");
 
 const HWND = windows.HWND;
 const UINT = windows.UINT;
@@ -34,7 +35,6 @@ const MSG = extern struct {
 
 const classNameW = std.unicode.utf8ToUtf16LeStringLiteral("LangReplaceWindow");
 const windowNameW = std.unicode.utf8ToUtf16LeStringLiteral("LangReplace");
-const translateTitleW = std.unicode.utf8ToUtf16LeStringLiteral("LangReplace - Translate");
 
 extern "user32" fn RegisterClassExW(wndClassEx: *const WNDCLASSEXW) callconv(windows.WINAPI) u16;
 extern "user32" fn CreateWindowExW(
@@ -81,14 +81,12 @@ const SW_HIDE: i32 = 0;
 const WS_OVERLAPPEDWINDOW: DWORD = 0x00CF0000;
 const CW_USEDEFAULT: i32 = @as(i32, @bitCast(@as(u32, 0x80000000)));
 
-// MB_ICONINFO | MB_SYSTEMMODAL | MB_SETFOREGROUND → همیشه روی همه پنجره‌ها
 const MB_TOP: UINT = 0x40 | 0x00001000 | 0x00010000;
+const IDYES: i32 = 6;
 
 var g_hInstance: ?HINSTANCE = null;
 var g_tray: ?tray.TrayManager = null;
 var g_icon: ?HICON = null;
-
-const ConvertMode = enum { auto_detect, force_english };
 
 fn notify(msg: []const u8) void {
     if (g_tray) |*t| t.showBalloon("LangReplace", msg);
@@ -125,29 +123,20 @@ fn waitForClipboardChange(old_seq: DWORD) bool {
     return false;
 }
 
-fn convertByMode(text: []const u8, mode: ConvertMode, allocator: std.mem.Allocator) ?[]u8 {
-    return switch (mode) {
-        .auto_detect => blk: {
-            const layout = converter.detectLayout(text);
-            const target: converter.KeyboardLayout = if (layout == .persian) .english else .persian;
-            break :blk converter.convertText(text, layout, target, allocator) catch return null;
-        },
-        .force_english => converter.convertText(text, .persian, .english, allocator) catch return null,
-    };
+fn convertByMode(text: []const u8, force_english: bool, allocator: std.mem.Allocator) ?[]u8 {
+    if (force_english) return converter.convertText(text, .persian, .english, allocator) catch null;
+    const layout = converter.detectLayout(text);
+    const target: converter.KeyboardLayout = if (layout == .persian) .english else .persian;
+    return converter.convertText(text, layout, target, allocator) catch null;
 }
 
-// ✅ Shift+F10: تغییر بزرگی/کوچکی حروف (abc <-> ABC)
 fn swapCaseText(text: []const u8, allocator: std.mem.Allocator) ![]u8 {
     var out = std.ArrayList(u8).init(allocator);
     errdefer out.deinit();
     for (text) |b| {
-        if (b >= 'a' and b <= 'z') {
-            try out.append(b - 32);
-        } else if (b >= 'A' and b <= 'Z') {
-            try out.append(b + 32);
-        } else {
-            try out.append(b);
-        }
+        if (b >= 'a' and b <= 'z') try out.append(b - 32);
+        else if (b >= 'A' and b <= 'Z') try out.append(b + 32);
+        else try out.append(b);
     }
     return out.toOwnedSlice();
 }
@@ -168,11 +157,8 @@ fn writeOverSelection(converted: []const u8, allocator: std.mem.Allocator) void 
 }
 
 fn doConvert(id: hotkey.HotkeyId, text: []const u8, allocator: std.mem.Allocator) ?[]u8 {
-    if (id == .convert_case) {
-        return swapCaseText(text, allocator) catch return null;
-    }
-    const mode: ConvertMode = if (id == .convert_reverse) .force_english else .auto_detect;
-    return convertByMode(text, mode, allocator);
+    if (id == .convert_case) return swapCaseText(text, allocator) catch null;
+    return convertByMode(text, id == .convert_reverse, allocator);
 }
 
 fn handleHotkey(id: hotkey.HotkeyId) void {
@@ -189,7 +175,7 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
         .translate => {
             logWrite("=== Ctrl+T translate ===");
             const text = readLineNow(allocator) orelse {
-                notify("✗ متنی برای ترجمه پیدا نشد");
+                notify(lang.t("✗ No text found", "✗ متنی پیدا نشد"));
                 return;
             };
             defer allocator.free(text);
@@ -197,36 +183,28 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
             if (text.len == 0) return;
 
             const result = translate.translate(text, allocator) orelse {
-                notify("✗ ترجمه انجام نشد (اینترنت؟)");
+                notify(lang.t("✗ Translation failed", "✗ ترجمه انجام نشد"));
                 return;
             };
             defer allocator.free(result);
 
             logWrite("TRANSLATE: ok");
-
             const bodyW = toWideZ(allocator, result) orelse return;
             defer allocator.free(bodyW);
-            _ = MessageBoxW(null, bodyW, translateTitleW, MB_TOP);
+            const titleW = toWideZ(allocator, lang.t("LangReplace - Translate", "LangReplace - ترجمه")) orelse return;
+            defer allocator.free(titleW);
+            _ = MessageBoxW(null, bodyW, titleW, MB_TOP);
             return;
         },
-        // ✅ Ctrl+M: تولید QR Code و نمایش در مرورگر
         .qr_code => {
             logWrite("=== Ctrl+M QR ===");
-            const text = readLineNow(allocator) orelse {
-                notify("✗ متنی برای QR پیدا نشد");
-                return;
-            };
+            const text = readLineNow(allocator) orelse return;
             defer allocator.free(text);
             keyboard.collapseSelection();
             if (text.len == 0) return;
-
             const q = translate.urlEncode(allocator, text) catch return;
             defer allocator.free(q);
-            const url = std.fmt.allocPrint(
-                allocator,
-                "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={s}",
-                .{q},
-            ) catch return;
+            const url = std.fmt.allocPrint(allocator, "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={s}", .{q}) catch return;
             defer allocator.free(url);
             _ = search.openUrl(url, allocator);
             return;
@@ -251,13 +229,13 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
                 defer allocator.free(converted);
                 if (std.mem.eql(u8, converted, t)) return;
                 writeOverSelection(converted, allocator);
-                notify("✓ تبدیل شد");
+                notify(lang.t("✓ Converted", "✓ تبدیل شد"));
                 return;
             }
         }
         keyboard.collapseSelection();
         logWrite("NONE");
-        notify("✗ متنی برای تبدیل پیدا نشد");
+        notify(lang.t("✗ No text found", "✗ متنی پیدا نشد"));
         return;
     };
     defer allocator.free(text);
@@ -283,20 +261,20 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
 
     const line_now = readLineNow(allocator) orelse {
         logWrite("VERIFY: null");
-        notify("✓ تبدیل شد");
+        notify(lang.t("✓ Converted", "✓ تبدیل شد"));
         return;
     };
     defer allocator.free(line_now);
 
     if (std.mem.eql(u8, line_now, converted)) {
         logWrite("VERIFY: match");
-        notify("✓ تبدیل شد");
+        notify(lang.t("✓ Converted", "✓ تبدیل شد"));
         return;
     }
 
     logWrite("VERIFY: mismatch -> rewrite");
     writeOverSelection(converted, allocator);
-    notify("✓ تبدیل شد (روش پشتیبان)");
+    notify(lang.t("✓ Converted (fallback)", "✓ تبدیل شد (پشتیبان)"));
 }
 
 fn handleMenuCommand(cmd: usize, hWnd: HWND) void {
@@ -309,7 +287,6 @@ fn handleMenuCommand(cmd: usize, hWnd: HWND) void {
         tray.MENU_ID_SETTINGS => {
             settings_ui.openSettings(g_hInstance, hWnd);
         },
-        tray.MENU_ID_CONVERT => handleHotkey(.convert),
         else => {},
     }
 }
@@ -347,11 +324,22 @@ fn windowProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(wi
     }
 }
 
+// ✅ انتخاب زبان در اولین اجرا
+fn firstRunLanguage() void {
+    if (config.fileExists()) return;
+    const q = std.unicode.utf8ToUtf16LeStringLiteral("Welcome to LangReplace!\nChoose UI language / زبان رابط را انتخاب کنید:\n\nYes = فارسی\nNo = English");
+    const c = std.unicode.utf8ToUtf16LeStringLiteral("LangReplace");
+    const r = MessageBoxW(null, q, c, 0x20 | 0x4 | MB_TOP);
+    config.g_config.language = if (r == IDYES) 1 else 0;
+    config.save(config.g_config, std.heap.page_allocator);
+}
+
 pub fn main() !void {
     const hModule = windows.kernel32.GetModuleHandleW(null);
     g_hInstance = @ptrCast(hModule);
     g_icon = loadAppIcon();
     config.g_config = config.load(std.heap.page_allocator);
+    firstRunLanguage();
 
     const wc: WNDCLASSEXW = .{
         .cbSize = @sizeOf(WNDCLASSEXW),
