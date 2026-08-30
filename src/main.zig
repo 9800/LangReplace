@@ -56,6 +56,7 @@ extern "user32" fn PostQuitMessage(nExitCode: i32) callconv(windows.WINAPI) void
 extern "user32" fn MessageBoxA(hWnd: ?HWND, lpText: windows.LPCSTR, lpCaption: windows.LPCSTR, uType: UINT) callconv(windows.WINAPI) i32;
 extern "user32" fn MessageBoxW(hWnd: ?HWND, lpText: [*:0]const u16, lpCaption: [*:0]const u16, uType: UINT) callconv(windows.WINAPI) i32;
 extern "user32" fn LoadIconW(hInstance: ?HINSTANCE, lpIconName: usize) callconv(windows.WINAPI) ?HICON;
+extern "user32" fn GetCursorPos(lpPoint: *POINT) callconv(windows.WINAPI) BOOL;
 
 const WNDCLASSEXW = extern struct {
     cbSize: UINT,
@@ -176,7 +177,6 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
 
             logWrite("TRANSLATE: ok");
 
-            // ✅ نمایش قطعی ترجمه در MessageBox
             const bodyW = toWideZ(allocator, result) orelse return;
             defer allocator.free(bodyW);
             _ = MessageBoxW(null, bodyW, translateTitleW, 0x40);
@@ -285,11 +285,15 @@ fn windowProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(wi
             return 0;
         },
         tray.WM_TRAYICON => {
-            if (g_tray) |*t| {
-                const x = @as(i32, @intCast(@as(i16, @truncate(lParam))));
-                const y = @as(i32, @intCast(@as(i16, @truncate(lParam >> 16))));
-                const cmd = t.showContextMenu(x, y);
-                if (cmd != 0) handleMenuCommand(cmd, hWnd);
+            // ✅ lParam در WM_TRAYICON = پیام ماوس
+            const mouse_msg: UINT = @intCast(lParam & 0xFFFF);
+            if (mouse_msg == tray.WM_RBUTTONUP) {
+                if (g_tray) |*t| {
+                    var pt: POINT = .{ .x = 0, .y = 0 };
+                    _ = GetCursorPos(&pt);
+                    const cmd = t.showContextMenu(pt.x, pt.y);
+                    if (cmd != 0) handleMenuCommand(cmd, hWnd);
+                }
             }
             return 0;
         },
