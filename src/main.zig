@@ -52,8 +52,6 @@ extern "user32" fn DispatchMessageW(lpMsg: *const MSG) callconv(windows.WINAPI) 
 extern "user32" fn DefWindowProcW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT;
 extern "user32" fn PostQuitMessage(nExitCode: i32) callconv(windows.WINAPI) void;
 extern "user32" fn MessageBoxA(hWnd: ?HWND, lpText: windows.LPCSTR, lpCaption: windows.LPCSTR, uType: UINT) callconv(windows.WINAPI) i32;
-
-// ✅ پارامتر دوم usize (همون MAKEINTRESOURCE بدون مشکل هم‌ترازی)
 extern "user32" fn LoadIconW(hInstance: ?HINSTANCE, lpIconName: usize) callconv(windows.WINAPI) ?HICON;
 
 const WNDCLASSEXW = extern struct {
@@ -88,7 +86,16 @@ fn notify(msg: []const u8) void {
     if (g_tray) |*t| t.showBalloon("LangReplace", msg);
 }
 
-// ✅ آیکون از ریسورس داخل خود exe (شناسه 1) + fallback به آیکون پیش‌فرض
+// ✅ لاگ تشخیصی کنار فایل exe
+fn logWrite(msg: []const u8) void {
+    var file = std.fs.cwd().openFile("langreplace_debug.log", .{ .mode = .write_only }) catch
+        (std.fs.cwd().createFile("langreplace_debug.log", .{}) catch return);
+    defer file.close();
+    file.seekFromEnd(0) catch return;
+    file.writeAll(msg) catch return;
+    file.writeAll("\r\n") catch return;
+}
+
 fn loadAppIcon() ?HICON {
     return LoadIconW(g_hInstance, 1) orelse LoadIconW(null, 32512);
 }
@@ -143,19 +150,26 @@ fn verifiedReplace(old_text: []const u8, converted: []const u8, allocator: std.m
     std.time.sleep(150 * std.time.ns_per_ms);
 
     const line_now = readLineNow(allocator) orelse {
+        logWrite("VERIFY: null");
         notify("✓ تبدیل شد");
         return;
     };
     defer allocator.free(line_now);
 
     if (std.mem.eql(u8, line_now, converted)) {
+        logWrite("VERIFY: match");
         notify("✓ تبدیل شد");
         return;
     }
 
+    var buf: [512]u8 = undefined;
+    const m = std.fmt.bufPrint(&buf, "VERIFY: mismatch line={s}", .{line_now}) catch return;
+    logWrite(m);
+
     _ = clipboard.setClipboardText(converted);
     std.time.sleep(50 * std.time.ns_per_ms);
     keyboard.simulateCtrlCombo(keyboard.VK_V);
+    logWrite("FALLBACK: done");
     notify("✓ تبدیل شد (روش پشتیبان)");
 }
 
@@ -182,6 +196,8 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
         else => unreachable,
     };
 
+    logWrite("=== F10 pressed ===");
+
     // ===== مسیر ۱: متن انتخاب‌شده از قبل =====
     const seqA = clipboard.getSequence();
     keyboard.simulateCtrlCombo(keyboard.VK_C);
@@ -189,6 +205,9 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
         const text = clipboard.getClipboardText(allocator) catch return;
         if (text) |t| {
             defer allocator.free(t);
+            var buf: [512]u8 = undefined;
+            const m = std.fmt.bufPrint(&buf, "PATH1: text={s}", .{t}) catch return;
+            logWrite(m);
             if (t.len > 0) {
                 const converted = convertByMode(t, mode, allocator) orelse return;
                 defer allocator.free(converted);
@@ -215,6 +234,9 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
             const t3 = clipboard.getClipboardText(allocator) catch return;
             if (t3) |t| {
                 defer allocator.free(t);
+                var buf: [512]u8 = undefined;
+                const m = std.fmt.bufPrint(&buf, "PATH3: text={s}", .{t}) catch return;
+                logWrite(m);
                 if (t.len > 0) {
                     const converted = convertByMode(t, mode, allocator) orelse return;
                     defer allocator.free(converted);
@@ -229,10 +251,15 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
             }
         }
         keyboard.collapseSelection();
+        logWrite("NONE: no text found");
         notify("✗ متنی برای تبدیل پیدا نشد");
         return;
     };
     defer allocator.free(text);
+
+    var buf2: [512]u8 = undefined;
+    const m2 = std.fmt.bufPrint(&buf2, "PATH2: text={s}", .{text}) catch return;
+    logWrite(m2);
 
     if (text.len == 0) {
         keyboard.collapseSelection();
@@ -244,6 +271,7 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
 
     if (std.mem.eql(u8, converted, text)) {
         keyboard.collapseSelection();
+        logWrite("SKIP: converted == original");
         return;
     }
 
