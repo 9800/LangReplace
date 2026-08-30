@@ -17,6 +17,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // ✅ گنجاندن آیکون داخل exe
+    exe.addWin32ResourceFile(.{ .file = b.path("app.rc") });
+
     exe.linkSystemLibrary("user32");
     exe.linkSystemLibrary("shell32");
     exe.linkSystemLibrary("gdi32");
