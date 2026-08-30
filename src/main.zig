@@ -32,6 +32,7 @@ const MSG = extern struct {
 
 const classNameW = std.unicode.utf8ToUtf16LeStringLiteral("LangReplaceWindow");
 const windowNameW = std.unicode.utf8ToUtf16LeStringLiteral("LangReplace");
+const translateTitleW = std.unicode.utf8ToUtf16LeStringLiteral("LangReplace - Translate");
 
 extern "user32" fn RegisterClassExW(wndClassEx: *const WNDCLASSEXW) callconv(windows.WINAPI) u16;
 extern "user32" fn CreateWindowExW(
@@ -53,6 +54,7 @@ extern "user32" fn DispatchMessageW(lpMsg: *const MSG) callconv(windows.WINAPI) 
 extern "user32" fn DefWindowProcW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT;
 extern "user32" fn PostQuitMessage(nExitCode: i32) callconv(windows.WINAPI) void;
 extern "user32" fn MessageBoxA(hWnd: ?HWND, lpText: windows.LPCSTR, lpCaption: windows.LPCSTR, uType: UINT) callconv(windows.WINAPI) i32;
+extern "user32" fn MessageBoxW(hWnd: ?HWND, lpText: [*:0]const u16, lpCaption: [*:0]const u16, uType: UINT) callconv(windows.WINAPI) i32;
 extern "user32" fn LoadIconW(hInstance: ?HINSTANCE, lpIconName: usize) callconv(windows.WINAPI) ?HICON;
 
 const WNDCLASSEXW = extern struct {
@@ -85,6 +87,15 @@ const ConvertMode = enum { auto_detect, force_english, force_persian_case };
 
 fn notify(msg: []const u8) void {
     if (g_tray) |*t| t.showBalloon("LangReplace", msg);
+}
+
+fn toWideZ(allocator: std.mem.Allocator, s: []const u8) ?[:0]u16 {
+    const w = std.unicode.utf8ToUtf16LeAlloc(allocator, s) catch return null;
+    defer allocator.free(w);
+    const z = allocator.alloc(u16, w.len + 1) catch return null;
+    @memcpy(z[0..w.len], w);
+    z[w.len] = 0;
+    return z[0..w.len :0];
 }
 
 fn logWrite(msg: []const u8) void {
@@ -162,8 +173,13 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
                 return;
             };
             defer allocator.free(result);
+
             logWrite("TRANSLATE: ok");
-            notify(result);
+
+            // ✅ نمایش قطعی ترجمه در MessageBox
+            const bodyW = toWideZ(allocator, result) orelse return;
+            defer allocator.free(bodyW);
+            _ = MessageBoxW(null, bodyW, translateTitleW, 0x40);
             return;
         },
         .qr_code => return,
