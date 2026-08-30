@@ -82,7 +82,6 @@ const WS_OVERLAPPEDWINDOW: DWORD = 0x00CF0000;
 const CW_USEDEFAULT: i32 = @as(i32, @bitCast(@as(u32, 0x80000000)));
 
 const MB_TOP: UINT = 0x40 | 0x00001000 | 0x00010000;
-const IDYES: i32 = 6;
 
 var g_hInstance: ?HINSTANCE = null;
 var g_tray: ?tray.TrayManager = null;
@@ -130,7 +129,6 @@ fn convertByMode(text: []const u8, force_english: bool, allocator: std.mem.Alloc
     return converter.convertText(text, layout, target, allocator) catch null;
 }
 
-// ✅ تغییر بزرگی/کوچکی حروف (abc <-> ABC)
 fn swapCaseText(text: []const u8, allocator: std.mem.Allocator) ![]u8 {
     var out = std.ArrayList(u8).init(allocator);
     errdefer out.deinit();
@@ -329,13 +327,11 @@ fn windowProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(wi
     }
 }
 
-// ✅ انتخاب زبان در اولین اجرا
+// ✅ انتخاب زبان در اولین اجرا با دکمه‌های «فارسی» و «English»
 fn firstRunLanguage() void {
     if (config.fileExists()) return;
-    const q = std.unicode.utf8ToUtf16LeStringLiteral("Welcome to LangReplace!\nChoose UI language / زبان رابط را انتخاب کنید:\n\nYes = فارسی\nNo = English");
-    const c = std.unicode.utf8ToUtf16LeStringLiteral("LangReplace");
-    const r = MessageBoxW(null, q, c, 0x20 | 0x4 | MB_TOP);
-    config.g_config.language = if (r == IDYES) 1 else 0;
+    const choice = settings_ui.pickLanguage(g_hInstance);
+    config.g_config.language = choice;
     config.save(config.g_config, std.heap.page_allocator);
 }
 
@@ -380,11 +376,4 @@ pub fn main() !void {
         _ = TranslateMessage(&msg);
         _ = DispatchMessageW(&msg);
     }
-// ✅ انتخاب زبان در اولین اجرا با دکمه‌های «فارسی» و «English»
-fn firstRunLanguage() void {
-    if (config.fileExists()) return;
-    const choice = settings_ui.pickLanguage(g_hInstance);
-    config.g_config.language = choice;
-    config.save(config.g_config, std.heap.page_allocator);
-}
 }
