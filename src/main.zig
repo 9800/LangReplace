@@ -86,7 +86,6 @@ fn notify(msg: []const u8) void {
     if (g_tray) |*t| t.showBalloon("LangReplace", msg);
 }
 
-// ✅ لاگ تشخیصی کنار فایل exe
 fn logWrite(msg: []const u8) void {
     var file = std.fs.cwd().openFile("langreplace_debug.log", .{ .mode = .write_only }) catch
         (std.fs.cwd().createFile("langreplace_debug.log", .{}) catch return);
@@ -136,6 +135,51 @@ fn readLineNow(allocator: std.mem.Allocator) ?[]u8 {
     return clipboard.getClipboardText(allocator) catch null;
 }
 
+// ✅ نوشتن هوشمند: Ctrl+V + بررسی + اصلاح خودکار در صورت الصاق
+fn smartWrite(old_text: []const u8, converted: []const u8, allocator: std.mem.Allocator) void {
+    _ = clipboard.setClipboardText(converted);
+    std.time.sleep(50 * std.time.ns_per_ms);
+    keyboard.simulateCtrlCombo(keyboard.VK_V);
+    std.time.sleep(150 * std.time.ns_per_ms);
+
+    if (std.mem.indexOfScalar(u8, converted, '\n') != null) {
+        logWrite("WRITE: multiline trusted");
+        notify("✓ تبدیل شد");
+        return;
+    }
+
+    const L = readLineNow(allocator) orelse {
+        logWrite("WRITE: verify null");
+        notify("✓ تبدیل شد");
+        return;
+    };
+    defer allocator.free(L);
+
+    if (std.mem.eql(u8, L, converted)) {
+        logWrite("WRITE: match");
+        notify("✓ تبدیل شد");
+        return;
+    }
+
+    const tc = std.fmt.allocPrint(allocator, "{s}{s}", .{ old_text, converted }) catch return;
+    defer allocator.free(tc);
+    const ct = std.fmt.allocPrint(allocator, "{s}{s}", .{ converted, old_text }) catch return;
+    defer allocator.free(ct);
+
+    if (std.mem.eql(u8, L, tc) or std.mem.eql(u8, L, ct)) {
+        logWrite("WRITE: appended -> fallback replace");
+        // خط الان انتخاب شده؛ دوباره paste کن تا کل خط جایگزین بشه
+        _ = clipboard.setClipboardText(converted);
+        std.time.sleep(50 * std.time.ns_per_ms);
+        keyboard.simulateCtrlCombo(keyboard.VK_V);
+        notify("✓ تبدیل شد (روش پشتیبان)");
+        return;
+    }
+
+    logWrite("WRITE: partial selection ok");
+    notify("✓ تبدیل شد");
+}
+
 fn replaceLineInPlace(old_text: []const u8, new_text: []const u8, allocator: std.mem.Allocator) void {
     const old_len = utf16Len(old_text, allocator);
     keyboard.moveHome();
@@ -162,14 +206,10 @@ fn verifiedReplace(old_text: []const u8, converted: []const u8, allocator: std.m
         return;
     }
 
-    var buf: [512]u8 = undefined;
-    const m = std.fmt.bufPrint(&buf, "VERIFY: mismatch line={s}", .{line_now}) catch return;
-    logWrite(m);
-
+    logWrite("VERIFY: mismatch -> fallback");
     _ = clipboard.setClipboardText(converted);
     std.time.sleep(50 * std.time.ns_per_ms);
     keyboard.simulateCtrlCombo(keyboard.VK_V);
-    logWrite("FALLBACK: done");
     notify("✓ تبدیل شد (روش پشتیبان)");
 }
 
@@ -205,17 +245,12 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
         const text = clipboard.getClipboardText(allocator) catch return;
         if (text) |t| {
             defer allocator.free(t);
-            var buf: [512]u8 = undefined;
-            const m = std.fmt.bufPrint(&buf, "PATH1: text={s}", .{t}) catch return;
-            logWrite(m);
+            logWrite("PATH1");
             if (t.len > 0) {
                 const converted = convertByMode(t, mode, allocator) orelse return;
                 defer allocator.free(converted);
                 if (!std.mem.eql(u8, converted, t)) {
-                    _ = clipboard.setClipboardText(converted);
-                    std.time.sleep(50 * std.time.ns_per_ms);
-                    keyboard.simulateCtrlCombo(keyboard.VK_V);
-                    notify("✓ تبدیل شد");
+                    smartWrite(t, converted, allocator);
                 }
                 return;
             }
@@ -234,32 +269,25 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
             const t3 = clipboard.getClipboardText(allocator) catch return;
             if (t3) |t| {
                 defer allocator.free(t);
-                var buf: [512]u8 = undefined;
-                const m = std.fmt.bufPrint(&buf, "PATH3: text={s}", .{t}) catch return;
-                logWrite(m);
+                logWrite("PATH3");
                 if (t.len > 0) {
                     const converted = convertByMode(t, mode, allocator) orelse return;
                     defer allocator.free(converted);
                     if (!std.mem.eql(u8, converted, t)) {
-                        _ = clipboard.setClipboardText(converted);
-                        std.time.sleep(50 * std.time.ns_per_ms);
-                        keyboard.simulateCtrlCombo(keyboard.VK_V);
-                        notify("✓ تبدیل شد");
+                        smartWrite(t, converted, allocator);
                     }
                     return;
                 }
             }
         }
         keyboard.collapseSelection();
-        logWrite("NONE: no text found");
+        logWrite("NONE");
         notify("✗ متنی برای تبدیل پیدا نشد");
         return;
     };
     defer allocator.free(text);
 
-    var buf2: [512]u8 = undefined;
-    const m2 = std.fmt.bufPrint(&buf2, "PATH2: text={s}", .{text}) catch return;
-    logWrite(m2);
+    logWrite("PATH2");
 
     if (text.len == 0) {
         keyboard.collapseSelection();
@@ -271,7 +299,7 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
 
     if (std.mem.eql(u8, converted, text)) {
         keyboard.collapseSelection();
-        logWrite("SKIP: converted == original");
+        logWrite("SKIP: same");
         return;
     }
 
