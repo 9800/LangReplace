@@ -30,6 +30,10 @@ const ID_CLOSE: usize = 2302;
 const ID_LANG: usize = 2401;
 const ID_PICK_FA: usize = 9001;
 const ID_PICK_EN: usize = 9002;
+const ID_FLAG_IR1: usize = 9101;
+const ID_FLAG_IR2: usize = 9102;
+const ID_FLAG_US1: usize = 9103;
+const ID_FLAG_US2: usize = 9104;
 const CAPTURE_TIMER: usize = 999;
 
 const WS_POPUP: DWORD = 0x80000000;
@@ -37,6 +41,7 @@ const WS_CHILD: DWORD = 0x40000000;
 const WS_VISIBLE: DWORD = 0x10000000;
 const BS_CHECKBOX: DWORD = 0x3;
 const BS_OWNERDRAW: DWORD = 0xB;
+const SS_OWNERDRAW: DWORD = 0xD;
 const WM_CLOSE: UINT = 0x0010;
 const WM_COMMAND: UINT = 0x0111;
 const WM_ERASEBKGND: UINT = 0x0014;
@@ -68,7 +73,6 @@ const COL_BG = rgb(243, 240, 255);
 const COL_SPLASH_BG = rgb(255, 255, 255);
 const COL_TEXT = rgb(70, 40, 160);
 const COL_TITLE = rgb(90, 50, 190);
-const COL_SUB = rgb(120, 100, 160);
 const COL_BTN = rgb(124, 77, 255);
 const COL_OK = rgb(46, 175, 110);
 const COL_LANG = rgb(33, 150, 243);
@@ -127,6 +131,7 @@ extern "user32" fn PeekMessageW(lpMsg: *PMSG, hWnd: ?HWND, a: UINT, b: UINT, rem
 extern "user32" fn TranslateMessage(m: *const PMSG) callconv(windows.WINAPI) BOOL;
 extern "user32" fn DispatchMessageW(m: *const PMSG) callconv(windows.WINAPI) LRESULT;
 extern "user32" fn FillRect(hdc: HDC, r: *const windows.RECT, b: HBRUSH) callconv(windows.WINAPI) BOOL;
+extern "user32" fn FrameRect(hdc: HDC, r: *const windows.RECT, b: HBRUSH) callconv(windows.WINAPI) BOOL;
 extern "user32" fn DrawTextW(hdc: HDC, s: [*]const u16, c: i32, r: *windows.RECT, fmt: u32) callconv(windows.WINAPI) i32;
 extern "user32" fn GetWindowTextW(hWnd: HWND, s: [*]u16, c: i32) callconv(windows.WINAPI) i32;
 extern "user32" fn SetWindowRgn(hWnd: HWND, hRgn: HRGN, bRedraw: BOOL) callconv(windows.WINAPI) BOOL;
@@ -276,6 +281,63 @@ fn addControl(parent: HWND, classW: windows.LPCWSTR, textUtf8: []const u8, style
     return CreateWindowExW(0, classW, tw, WS_CHILD | WS_VISIBLE | style, x, y, w, h, parent, hMenu, g_hInst, null);
 }
 
+// 🇮🇷 رسم پرچم ایران
+fn drawIranFlag(dc: HDC, r: windows.RECT) void {
+    const h = r.bottom - r.top;
+    const t3 = @divTrunc(h, 3);
+
+    const g = CreateSolidBrush(rgb(35, 159, 64));
+    var gr = windows.RECT{ .left = r.left, .top = r.top, .right = r.right, .bottom = r.top + t3 };
+    _ = FillRect(dc, &gr, g);
+    _ = DeleteObject(g);
+
+    const wh = CreateSolidBrush(rgb(255, 255, 255));
+    var wr = windows.RECT{ .left = r.left, .top = r.top + t3, .right = r.right, .bottom = r.top + 2 * t3 };
+    _ = FillRect(dc, &wr, wh);
+    _ = DeleteObject(wh);
+
+    const rd = CreateSolidBrush(rgb(218, 53, 60));
+    var rr = windows.RECT{ .left = r.left, .top = r.top + 2 * t3, .right = r.right, .bottom = r.bottom };
+    _ = FillRect(dc, &rr, rd);
+    _ = DeleteObject(rd);
+
+    const bd = CreateSolidBrush(rgb(140, 140, 140));
+    _ = FrameRect(dc, &r, bd);
+    _ = DeleteObject(bd);
+}
+
+// 🇺🇸 رسم پرچم آمریکا
+fn drawUsFlag(dc: HDC, r: windows.RECT) void {
+    const h = r.bottom - r.top;
+    const w = r.right - r.left;
+    const stripes: i32 = 7;
+    const sh = @divTrunc(h, stripes);
+
+    var i: i32 = 0;
+    while (i < stripes) : (i += 1) {
+        const col = if (i % 2 == 0) rgb(179, 25, 66) else rgb(255, 255, 255);
+        const br = CreateSolidBrush(col);
+        var sr = windows.RECT{ .left = r.left, .top = r.top + i * sh, .right = r.right, .bottom = r.top + (i + 1) * sh };
+        if (i == stripes - 1) sr.bottom = r.bottom;
+        _ = FillRect(dc, &sr, br);
+        _ = DeleteObject(br);
+    }
+
+    const bl = CreateSolidBrush(rgb(60, 59, 110));
+    var cr = windows.RECT{
+        .left = r.left,
+        .top = r.top,
+        .right = r.left + @divTrunc(w * 2, 5),
+        .bottom = r.top + @divTrunc(h, 2),
+    };
+    _ = FillRect(dc, &cr, bl);
+    _ = DeleteObject(bl);
+
+    const bd = CreateSolidBrush(rgb(140, 140, 140));
+    _ = FrameRect(dc, &r, bd);
+    _ = DeleteObject(bd);
+}
+
 fn colorMessages(Msg: UINT, wParam: WPARAM, lParam: LPARAM) ?LRESULT {
     switch (Msg) {
         WM_ERASEBKGND => {
@@ -288,7 +350,7 @@ fn colorMessages(Msg: UINT, wParam: WPARAM, lParam: LPARAM) ?LRESULT {
         },
         WM_CTLCOLORSTATIC => {
             const hdc: HDC = @ptrFromInt(wParam);
-            const col = if (in_splash) COL_TITLE else COL_TEXT;
+            const col = if (in_splash) COL_TEXT else COL_TEXT;
             _ = SetTextColor(hdc, col);
             _ = SetBkMode(hdc, 1);
             ensureBrushes();
@@ -299,6 +361,17 @@ fn colorMessages(Msg: UINT, wParam: WPARAM, lParam: LPARAM) ?LRESULT {
             const dis: *DRAWITEMSTRUCT = @ptrFromInt(@as(usize, @bitCast(lParam)));
             if (dis.hDC) |dc| {
                 const id = dis.CtlID;
+
+                // 🚩 پرچم‌ها
+                if (id == ID_FLAG_IR1 or id == ID_FLAG_IR2) {
+                    drawIranFlag(dc, dis.rcItem);
+                    return 1;
+                }
+                if (id == ID_FLAG_US1 or id == ID_FLAG_US2) {
+                    drawUsFlag(dc, dis.rcItem);
+                    return 1;
+                }
+
                 const fill = if (id == ID_OK) COL_OK else if (id == ID_CLOSE) COL_CLOSE else if (id == ID_LANG) COL_LANG else if (id == ID_PICK_FA) COL_BTN else if (id == ID_PICK_EN) COL_LANG else COL_BTN;
                 const br = CreateSolidBrush(fill);
                 const pen = CreatePen(0, 2, fill);
@@ -342,11 +415,10 @@ pub fn showSplash(hInst: ?HINSTANCE, icon: ?windows.HICON) void {
     };
     _ = RegisterClassExW(&wc);
 
-    const sw: i32 = 440;
-    const sh: i32 = 260;
+    const sw: i32 = 470;
+    const sh: i32 = 340;
     const screenW = GetSystemMetrics(SM_CXSCREEN);
     const screenH = GetSystemMetrics(SM_CYSCREEN);
-    // ✅ تقسیم صحیح اعداد علامت‌دار
     const x = @divTrunc(screenW - sw, 2);
     const y = @divTrunc(screenH - sh, 2);
 
@@ -361,18 +433,39 @@ pub fn showSplash(hInst: ?HINSTANCE, icon: ?windows.HICON) void {
 
     roundRgn(hWnd, sw, sh);
 
+    // نوار بالا: نسخه + نام
+    _ = addControl(hWnd, stcClsW, "v1.0", 0, 15, 10, 80, 18, 0);
+    _ = addControl(hWnd, stcClsW, lang.t("Keyboard Layout Converter", "ابزار تبدیل چیدمان کیبورد"), 0, 250, 10, 200, 18, 0);
+
+    // آیکون + عنوان
     if (icon) |ic| {
         const emptyW = mkWide(allocator, "") orelse return;
         defer allocator.free(emptyW);
-        if (CreateWindowExW(0, stcClsW, emptyW, WS_CHILD | WS_VISIBLE | SS_ICON | SS_CENTERIMAGE, 30, 50, 64, 64, hWnd, null, hInst, null)) |icHwnd| {
+        if (CreateWindowExW(0, stcClsW, emptyW, WS_CHILD | WS_VISIBLE | SS_ICON | SS_CENTERIMAGE, 30, 40, 64, 64, hWnd, null, hInst, null)) |icHwnd| {
             _ = SendMessageW(icHwnd, STM_SETICON, @intFromPtr(ic), 0);
         }
     }
+    _ = addControl(hWnd, stcClsW, "LangReplace", 0, 110, 45, 320, 45, 0);
+    _ = addControl(hWnd, stcClsW, lang.t("Fast & lightweight hotkey tools", "ابزارهای کلید میان‌بر، سریع و سبک"), 0, 110, 92, 320, 20, 0);
 
-    _ = addControl(hWnd, stcClsW, "LangReplace", 0, 110, 50, 300, 50, 0);
-    _ = addControl(hWnd, stcClsW, lang.t("Keyboard Layout Converter", "ابزار تبدیل چیدمان کیبورد"), 0, 110, 105, 300, 24, 0);
-    _ = addControl(hWnd, stcClsW, "v1.0", 0, 110, 135, 300, 20, 0);
-    _ = addControl(hWnd, stcClsW, lang.t("Programmer: Nikan Rayan 💜", "برنامه‌نویس: نیکان رایان 💜"), 0, 30, 210, 380, 24, 0);
+    // 🚩 لیست قابلیت‌ها با پرچم
+    const fy: i32 = 130;
+    const row: i32 = 30;
+
+    _ = addControl(hWnd, stcClsW, "", SS_OWNERDRAW, 30, fy + 2, 26, 17, ID_FLAG_IR1);
+    _ = addControl(hWnd, stcClsW, lang.t("(F10) Convert  abc <-> FA", "(F10) تبدیل  abc <-> فارسی"), 0, 64, fy, 380, 22, 0);
+
+    _ = addControl(hWnd, stcClsW, "", SS_OWNERDRAW, 30, fy + row + 2, 26, 17, ID_FLAG_IR2);
+    _ = addControl(hWnd, stcClsW, lang.t("(F6) Reverse text", "(F6) معکوس کردن متن"), 0, 64, fy + row, 380, 22, 0);
+
+    _ = addControl(hWnd, stcClsW, "", SS_OWNERDRAW, 30, fy + 2 * row + 2, 26, 17, ID_FLAG_US1);
+    _ = addControl(hWnd, stcClsW, "(Ctrl+G) Search in Google", 0, 64, fy + 2 * row, 380, 22, 0);
+
+    _ = addControl(hWnd, stcClsW, "", SS_OWNERDRAW, 30, fy + 3 * row + 2, 26, 17, ID_FLAG_US2);
+    _ = addControl(hWnd, stcClsW, lang.t("(Ctrl+T) Translate", "(Ctrl+T) ترجمه"), 0, 64, fy + 3 * row, 380, 22, 0);
+
+    // پاورقی
+    _ = addControl(hWnd, stcClsW, lang.t("Programmer: Nikan Rayan 💜", "برنامه‌نویس: نیکان رایان 💜"), 0, 30, 295, 410, 24, 0);
 
     in_splash = true;
     _ = ShowWindow(hWnd, SW_SHOW);
