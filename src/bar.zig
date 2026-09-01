@@ -131,7 +131,8 @@ fn toggleLayout() void {
     const fg = GetForegroundWindow() orelse return;
     const klid: [*:0]const u16 = if (isFaLayout()) klidEnW else klidFaW;
     const hkl = LoadKeyboardLayoutW(klid, 1) orelse return;
-    _ = PostMessageW(fg, WM_INPUTLANGCHANGEREQUEST, 0, @intFromPtr(hkl));
+    // ✅ تبدیل امن به LPARAM
+    _ = PostMessageW(fg, WM_INPUTLANGCHANGEREQUEST, 0, @as(LPARAM, @bitCast(@intFromPtr(hkl))));
 }
 
 fn toggleProgram() void {
@@ -212,7 +213,6 @@ fn barProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windo
                     _ = FrameRect(hdc, &sr, bd);
                     _ = DeleteObject(bd);
 
-                    // ✅ برچسب: نوشتن در بافر و ارسال &buf
                     var buf: [16]u16 = undefined;
                     _ = toWideBuf(&buf, segLabel(i));
                     _ = SetBkMode(hdc, 1);
