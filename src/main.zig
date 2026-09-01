@@ -134,8 +134,7 @@ fn waitForClipboardChange(old_seq: DWORD) bool {
     return false;
 }
 
-fn convertByMode(text: []const u8, force_english: bool, allocator: std.mem.Allocator) ?[]u8 {
-    _ = force_english;
+fn convertByMode(text: []const u8, allocator: std.mem.Allocator) ?[]u8 {
     const layout = converter.detectLayout(text);
     const target: converter.KeyboardLayout = if (layout == .persian) .english else .persian;
     return converter.convertText(text, layout, target, allocator) catch null;
@@ -156,7 +155,6 @@ fn swapCaseText(text: []const u8, allocator: std.mem.Allocator) ![]u8 {
     return out.toOwnedSlice();
 }
 
-// ✅ F6: معکوس کردن ترتیب حروف (سلام → مالس / hello → olleh)
 fn reverseText(text: []const u8, allocator: std.mem.Allocator) ![]u8 {
     var cps = std.ArrayList(u21).init(allocator);
     defer cps.deinit();
@@ -196,11 +194,17 @@ fn writeOverSelection(converted: []const u8, allocator: std.mem.Allocator) void 
     keyboard.typeUnicodeText(converted, allocator);
 }
 
+// ✅ پاک‌سازی انتهای هر عملیات: تثبیت + جمع کردن selection
+fn settleAndClean() void {
+    std.time.sleep(40 * std.time.ns_per_ms);
+    keyboard.collapseSelection();
+}
+
 fn doConvert(id: hotkey.HotkeyId, text: []const u8, allocator: std.mem.Allocator) ?[]u8 {
     return switch (id) {
         .convert_case => swapCaseText(text, allocator) catch null,
         .convert_reverse => reverseText(text, allocator) catch null,
-        else => convertByMode(text, false, allocator),
+        else => convertByMode(text, allocator),
     };
 }
 
@@ -276,6 +280,7 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
                 defer allocator.free(converted);
                 if (std.mem.eql(u8, converted, t)) return;
                 writeOverSelection(converted, allocator);
+                settleAndClean(); // ✅
                 notify(lang.t("✓ Converted", "✓ تبدیل شد"));
                 return;
             }
@@ -294,7 +299,10 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
         return;
     }
 
-    const converted = doConvert(id, text, allocator) orelse return;
+    const converted = doConvert(id, text, allocator) orelse {
+        keyboard.collapseSelection();
+        return;
+    };
     defer allocator.free(converted);
 
     if (std.mem.eql(u8, converted, text)) {
@@ -308,6 +316,7 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
 
     const line_now = readLineNow(allocator) orelse {
         logWrite("VERIFY: null");
+        settleAndClean(); // ✅
         notify(lang.t("✓ Converted", "✓ تبدیل شد"));
         return;
     };
@@ -315,12 +324,14 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
 
     if (std.mem.eql(u8, line_now, converted)) {
         logWrite("VERIFY: match");
+        settleAndClean(); // ✅
         notify(lang.t("✓ Converted", "✓ تبدیل شد"));
         return;
     }
 
     logWrite("VERIFY: mismatch -> rewrite");
     writeOverSelection(converted, allocator);
+    settleAndClean(); // ✅
     notify(lang.t("✓ Converted (fallback)", "✓ تبدیل شد (پشتیبان)"));
 }
 
