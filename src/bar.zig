@@ -3,6 +3,7 @@ const windows = std.os.windows;
 const config = @import("config.zig");
 const hotkey = @import("hotkey.zig");
 const clipboard = @import("clipboard.zig");
+const lang = @import("lang.zig");
 
 const HWND = windows.HWND;
 const UINT = windows.UINT;
@@ -58,8 +59,6 @@ const DT_SINGLELINE: u32 = 0x20;
 const WM_INPUTLANGCHANGEREQUEST: UINT = 0x0050;
 const KEYEVENTF_EXTENDEDKEY: DWORD = 0x0001;
 const KEYEVENTF_KEYUP: DWORD = 0x0002;
-const CF_UNICODETEXT: UINT = 13;
-const GMEM_MOVEABLE: UINT = 0x0002;
 
 extern "user32" fn RegisterClassExW(w: *const WNDCLASSEXW) callconv(windows.WINAPI) u16;
 extern "user32" fn CreateWindowExW(a: DWORD, b: windows.LPCWSTR, c: windows.LPCWSTR, d: DWORD, e: i32, f: i32, g: i32, h: i32, i: ?HWND, j: ?windows.HMENU, k: ?HINSTANCE, l: ?*anyopaque) callconv(windows.WINAPI) ?HWND;
@@ -87,14 +86,7 @@ extern "user32" fn MapVirtualKeyW(code: u32, mapType: u32) callconv(windows.WINA
 extern "user32" fn GetWindowTextW(hWnd: HWND, s: [*]u16, c: i32) callconv(windows.WINAPI) i32;
 extern "user32" fn GetWindowTextLengthW(hWnd: HWND) callconv(windows.WINAPI) i32;
 extern "user32" fn SetWindowTextW(hWnd: HWND, s: [*:0]const u16) callconv(windows.WINAPI) BOOL;
-extern "user32" fn OpenClipboard(hWnd: ?HWND) callconv(windows.WINAPI) BOOL;
-extern "user32" fn CloseClipboard() callconv(windows.WINAPI) BOOL;
-extern "user32" fn EmptyClipboard() callconv(windows.WINAPI) BOOL;
-extern "user32" fn SetClipboardData(fmt: UINT, hMem: ?*anyopaque) callconv(windows.WINAPI) ?*anyopaque;
 extern "kernel32" fn GetModuleFileNameW(h: ?windows.HMODULE, p: [*]u16, n: DWORD) callconv(windows.WINAPI) DWORD;
-extern "kernel32" fn GlobalAlloc(flags: UINT, size: usize) callconv(windows.WINAPI) ?*anyopaque;
-extern "kernel32" fn GlobalLock(hMem: ?*anyopaque) callconv(windows.WINAPI) ?*anyopaque;
-extern "kernel32" fn GlobalUnlock(hMem: ?*anyopaque) callconv(windows.WINAPI) BOOL;
 extern "gdi32" fn CreateSolidBrush(c: u32) callconv(windows.WINAPI) HBRUSH;
 extern "gdi32" fn CreateRoundRectRgn(l: i32, t: i32, r: i32, b: i32, w: i32, h: i32) callconv(windows.WINAPI) HRGN;
 extern "gdi32" fn RoundRect(hdc: HDC, l: i32, t: i32, r: i32, b: i32, w: i32, h: i32) callconv(windows.WINAPI) BOOL;
@@ -121,7 +113,7 @@ const PAINTSTRUCT = extern struct {
     rgbReserved: [32]u8,
 };
 
-// ✅ تعریف فراموش‌شده
+// ✅ ساختار DRAWITEMSTRUCT (جا افتاده بود)
 const DRAWITEMSTRUCT = extern struct {
     CtlType: UINT,
     CtlID: UINT,
@@ -269,29 +261,11 @@ fn editTextAlloc(allocator: std.mem.Allocator) ?[]u8 {
     return std.unicode.utf16LeToUtf8Alloc(allocator, buf[0..@as(usize, @intCast(n))]) catch null;
 }
 
-// ✅ کپی مستقل با API کلیپ‌بورد
-fn setClipText(text: []const u8) void {
-    const allocator = std.heap.page_allocator;
-    const w = std.unicode.utf8ToUtf16LeAlloc(allocator, text) catch return;
-    defer allocator.free(w);
-    if (OpenClipboard(null) == 0) return;
-    defer _ = CloseClipboard();
-    _ = EmptyClipboard();
-    const bytes = (w.len + 1) * 2;
-    const hMem = GlobalAlloc(GMEM_MOVEABLE, bytes) orelse return;
-    const ptr = GlobalLock(hMem) orelse return;
-    const u16ptr: [*]u16 = @ptrCast(@alignCast(ptr));
-    @memcpy(u16ptr[0..w.len], w);
-    u16ptr[w.len] = 0;
-    _ = GlobalUnlock(hMem);
-    _ = SetClipboardData(CF_UNICODETEXT, hMem);
-}
-
 fn noteCopy() void {
     const allocator = std.heap.page_allocator;
     const text = editTextAlloc(allocator) orelse return;
     defer allocator.free(text);
-    setClipText(text);
+    _ = clipboard.setClipboardText(text);
 }
 
 fn notePaste() void {
@@ -306,17 +280,13 @@ fn notePaste() void {
     _ = SendMessageW(h, EM_REPLACESEL, 0, @as(LPARAM, @bitCast(@intFromPtr(w.ptr))));
 }
 
-// ✅ ذخیره با انواع صحیح
 fn noteSave() void {
     const allocator = std.heap.page_allocator;
+    const text = editTextAlloc(allocator) orelse "";
     const p = notePath(allocator);
     var f = std.fs.cwd().createFile(p, .{}) catch return;
     defer f.close();
-    const text = editTextAlloc(allocator);
-    if (text) |t| {
-        defer allocator.free(t);
-        f.writeAll(t) catch return;
-    }
+    f.writeAll(text) catch return;
 }
 
 fn loadNote() void {
@@ -542,6 +512,7 @@ pub fn createBar(hInst: ?HINSTANCE, mainHwnd: ?HWND) void {
     const rgn = CreateRoundRectRgn(0, 0, BAR_W + 1, BAR_H + 1, 14, 14) orelse return;
     _ = SetWindowRgn(hWnd, rgn, 1);
 
+    // 📝 یادداشت
     const emptyW = std.unicode.utf8ToUtf16LeStringLiteral("");
     note_hwnd = CreateWindowExW(
         WS_EX_CLIENTEDGE, editClsW, emptyW,
@@ -550,6 +521,7 @@ pub fn createBar(hInst: ?HINSTANCE, mainHwnd: ?HWND) void {
         hWnd, @ptrFromInt(ID_NOTE), hInst, null,
     );
 
+    // دکمه‌های کپی/پیست/ذخیره
     const copyW = std.unicode.utf8ToUtf16LeStringLiteral("Copy");
     const pasteW = std.unicode.utf8ToUtf16LeStringLiteral("Paste");
     const saveW = std.unicode.utf8ToUtf16LeStringLiteral("Save");
