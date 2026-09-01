@@ -26,16 +26,16 @@ jobs:
         run: choco install innosetup --no-progress
 
       - name: Build Installer
-        run: & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\LangReplace.iss"
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\LangReplace.iss"'
 
       - name: Upload Portable App
         uses: actions/upload-artifact@v4
         with:
           name: LangReplace
-          path: zig-out\bin\LangReplace.exe
+          path: zig-out/bin/LangReplace.exe
 
       - name: Upload Installer
         uses: actions/upload-artifact@v4
         with:
           name: LangReplace-Setup
-          path: installer\Output\LangReplace-Setup.exe
+          path: installer/Output/LangReplace-Setup.exe
