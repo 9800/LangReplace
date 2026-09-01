@@ -25,7 +25,7 @@ const BAR_TIMER: usize = 777;
 const WM_ERASEBKGND: UINT = 0x0014;
 const WM_PAINT: UINT = 0x000F;
 const WM_LBUTTONDOWN: UINT = 0x0201;
-const WM_NCHITTEST: UINT = 0x0084;
+const WM_NCLBUTTONDOWN: UINT = 0x00A1;
 const WM_TIMER: UINT = 0x0113;
 const HTCAPTION: LRESULT = 2;
 const WS_POPUP: DWORD = 0x80000000;
@@ -52,6 +52,8 @@ extern "user32" fn GetWindowThreadProcessId(hWnd: HWND, p: ?*DWORD) callconv(win
 extern "user32" fn GetForegroundWindow() callconv(windows.WINAPI) ?HWND;
 extern "user32" fn LoadKeyboardLayoutW(klid: [*:0]const u16, flags: UINT) callconv(windows.WINAPI) HKL;
 extern "user32" fn PostMessageW(hWnd: HWND, Msg: UINT, w: WPARAM, l: LPARAM) callconv(windows.WINAPI) BOOL;
+extern "user32" fn SendMessageW(hWnd: HWND, Msg: UINT, w: WPARAM, l: LPARAM) callconv(windows.WINAPI) LRESULT;
+extern "user32" fn ReleaseCapture() callconv(windows.WINAPI) BOOL;
 extern "user32" fn BeginPaint(hWnd: HWND, ps: *PAINTSTRUCT) callconv(windows.WINAPI) HDC;
 extern "user32" fn EndPaint(hWnd: HWND, ps: *const PAINTSTRUCT) callconv(windows.WINAPI) BOOL;
 extern "user32" fn FillRect(hdc: HDC, r: *const windows.RECT, b: HBRUSH) callconv(windows.WINAPI) BOOL;
@@ -96,6 +98,7 @@ const klidEnW = std.unicode.utf8ToUtf16LeStringLiteral("00000409");
 var bar_hwnd: ?HWND = null;
 var g_main_hwnd: ?HWND = null;
 var g_enabled: bool = true;
+var last_states: [6]bool = .{ false, false, false, false, false, false };
 
 fn rgb(r: u32, g: u32, b: u32) u32 {
     return r | (g << 8) | (b << 16);
@@ -131,7 +134,6 @@ fn toggleLayout() void {
     const fg = GetForegroundWindow() orelse return;
     const klid: [*:0]const u16 = if (isFaLayout()) klidEnW else klidFaW;
     const hkl = LoadKeyboardLayoutW(klid, 1) orelse return;
-    // ✅ تبدیل امن به LPARAM
     _ = PostMessageW(fg, WM_INPUTLANGCHANGEREQUEST, 0, @as(LPARAM, @bitCast(@intFromPtr(hkl))));
 }
 
@@ -183,25 +185,73 @@ fn toWideBuf(buf: []u16, s: []const u8) usize {
     return di;
 }
 
+// 🇮
+fn drawIranFlag(dc: HDC, r: windows.RECT) void {
+    const h = r.bottom - r.top;
+    const t3 = @divTrunc(h, 3);
+    const g = CreateSolidBrush(rgb(35, 159, 64));
+    var gr = windows.RECT{ .left = r.left, .top = r.top, .right = r.right, .bottom = r.top + t3 };
+    _ = FillRect(dc, &gr, g);
+    _ = DeleteObject(g);
+    const wh = CreateSolidBrush(rgb(255, 255, 255));
+    var wr = windows.RECT{ .left = r.left, .top = r.top + t3, .right = r.right, .bottom = r.top + 2 * t3 };
+    _ = FillRect(dc, &wr, wh);
+    _ = DeleteObject(wh);
+    const rd = CreateSolidBrush(rgb(218, 53, 60));
+    var rr = windows.RECT{ .left = r.left, .top = r.top + 2 * t3, .right = r.right, .bottom = r.bottom };
+    _ = FillRect(dc, &rr, rd);
+    _ = DeleteObject(rd);
+}
+
+// 🇺🇸
+fn drawUsFlag(dc: HDC, r: windows.RECT) void {
+    const h = r.bottom - r.top;
+    const w = r.right - r.left;
+    const stripes: i32 = 7;
+    const sh = @divTrunc(h, stripes);
+    var i: i32 = 0;
+    while (i < stripes) : (i += 1) {
+        const col = if (@rem(i, 2) == 0) rgb(179, 25, 66) else rgb(255, 255, 255);
+        const br = CreateSolidBrush(col);
+        var sr = windows.RECT{ .left = r.left, .top = r.top + i * sh, .right = r.right, .bottom = r.top + (i + 1) * sh };
+        if (i == stripes - 1) sr.bottom = r.bottom;
+        _ = FillRect(dc, &sr, br);
+        _ = DeleteObject(br);
+    }
+    const bl = CreateSolidBrush(rgb(60, 59, 110));
+    var cr = windows.RECT{ .left = r.left, .top = r.top, .right = r.left + @divTrunc(w * 2, 5), .bottom = r.top + @divTrunc(h, 2) };
+    _ = FillRect(dc, &cr, bl);
+    _ = DeleteObject(bl);
+}
+
 fn barProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT {
     switch (Msg) {
-        WM_NCHITTEST => return HTCAPTION,
+        // ✅ بدون پاک‌سازی → بدون چشمک
+        WM_ERASEBKGND => return 1,
         WM_TIMER => {
-            _ = InvalidateRect(hWnd, null, 1);
+            // ✅ فقط وقتی چیزی عوض شد redraw کن
+            var changed = false;
+            var i: usize = 0;
+            while (i < 6) : (i += 1) {
+                const cur = isOn(i);
+                if (cur != last_states[i]) {
+                    last_states[i] = cur;
+                    changed = true;
+                }
+            }
+            if (changed) _ = InvalidateRect(hWnd, null, 0);
             return 0;
-        },
-        WM_ERASEBKGND => {
-            const hdc: HDC = @ptrFromInt(wParam);
-            var r = windows.RECT{ .left = 0, .top = 0, .right = BAR_W, .bottom = BAR_H };
-            const br = CreateSolidBrush(COL_BAR);
-            _ = FillRect(hdc, &r, br);
-            _ = DeleteObject(br);
-            return 1;
         },
         WM_PAINT => {
             var ps: PAINTSTRUCT = undefined;
             const dc = BeginPaint(hWnd, &ps);
             if (dc) |hdc| {
+                // پس‌زمینه یکپارچه
+                var bgr = windows.RECT{ .left = 0, .top = 0, .right = BAR_W, .bottom = BAR_H };
+                const bb = CreateSolidBrush(COL_BAR);
+                _ = FillRect(hdc, &bgr, bb);
+                _ = DeleteObject(bb);
+
                 var i: usize = 0;
                 while (i < 6) : (i += 1) {
                     const x: i32 = @intCast(4 + i * (SEG_W + 2));
@@ -220,15 +270,33 @@ fn barProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windo
                     var tr = windows.RECT{ .left = x, .top = 4, .right = x + SEG_W, .bottom = 20 };
                     _ = DrawTextW(hdc, &buf, -1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
-                    const on = isOn(i);
-                    const ledCol = if (on) COL_ON else (if (i == 5) COL_OFFLR else COL_OFF);
-                    var lr = windows.RECT{ .left = x + 8, .top = 25, .right = x + SEG_W - 8, .bottom = 36 };
-                    const lb = CreateSolidBrush(ledCol);
-                    _ = FillRect(hdc, &lr, lb);
-                    _ = DeleteObject(lb);
-                    const lb2 = CreateSolidBrush(rgb(120, 130, 150));
-                    _ = FrameRect(hdc, &lr, lb2);
-                    _ = DeleteObject(lb2);
+                    if (i == 0) {
+                        // ✅ پرچم زبان فعال + چراغ
+                        var fr = windows.RECT{ .left = x + 5, .top = 24, .right = x + 27, .bottom = 37 };
+                        if (isFaLayout()) {
+                            drawIranFlag(hdc, fr);
+                        } else {
+                            drawUsFlag(hdc, fr);
+                        }
+                        const on = isOn(i);
+                        var lr = windows.RECT{ .left = x + 32, .top = 25, .right = x + SEG_W - 6, .bottom = 36 };
+                        const lb = CreateSolidBrush(if (on) COL_ON else COL_OFF);
+                        _ = FillRect(hdc, &lr, lb);
+                        _ = DeleteObject(lb);
+                        const lb2 = CreateSolidBrush(rgb(120, 130, 150));
+                        _ = FrameRect(hdc, &lr, lb2);
+                        _ = DeleteObject(lb2);
+                    } else {
+                        const on = isOn(i);
+                        const ledCol = if (on) COL_ON else (if (i == 5) COL_OFFLR else COL_OFF);
+                        var lr = windows.RECT{ .left = x + 8, .top = 25, .right = x + SEG_W - 8, .bottom = 36 };
+                        const lb = CreateSolidBrush(ledCol);
+                        _ = FillRect(hdc, &lr, lb);
+                        _ = DeleteObject(lb);
+                        const lb2 = CreateSolidBrush(rgb(120, 130, 150));
+                        _ = FrameRect(hdc, &lr, lb2);
+                        _ = DeleteObject(lb2);
+                    }
                 }
             }
             _ = EndPaint(hWnd, &ps);
@@ -247,9 +315,12 @@ fn barProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windo
                         4 => tapKey(0x91),
                         else => toggleProgram(),
                     }
-                    _ = InvalidateRect(hWnd, null, 1);
+                    _ = InvalidateRect(hWnd, null, 0);
                 }
             }
+            // ✅ کلیک = عمل + قابلیت درگ
+            _ = ReleaseCapture();
+            _ = SendMessageW(hWnd, WM_NCLBUTTONDOWN, @as(WPARAM, @intCast(HTCAPTION)), lParam);
             return 0;
         },
         else => return DefWindowProcW(hWnd, Msg, wParam, lParam),
@@ -258,6 +329,11 @@ fn barProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windo
 
 pub fn createBar(hInst: ?HINSTANCE, mainHwnd: ?HWND) void {
     g_main_hwnd = mainHwnd;
+
+    var i: usize = 0;
+    while (i < 6) : (i += 1) {
+        last_states[i] = isOn(i);
+    }
 
     const wc: WNDCLASSEXW = .{
         .cbSize = @sizeOf(WNDCLASSEXW), .style = 0, .lpfnWndProc = barProc,
