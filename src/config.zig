@@ -11,6 +11,7 @@ pub const Hotkey = struct { mod: u32 = 0, vk: u32 = 0 };
 
 pub const Config = struct {
     language: u32 = 0, // 0=English, 1=Persian
+    autostart: bool = false,
     ignore_upper_case: bool = true,
     ignore_english: bool = true,
     enable_middle_mouse: bool = false,
@@ -58,6 +59,7 @@ pub fn save(cfg: Config, allocator: std.mem.Allocator) void {
     const p = cfgPath(allocator);
     const s = std.fmt.allocPrint(allocator,
         \\language={d}
+        \\autostart={s}
         \\ignore_upper_case={s}
         \\ignore_english={s}
         \\enable_middle_mouse={s}
@@ -70,6 +72,7 @@ pub fn save(cfg: Config, allocator: std.mem.Allocator) void {
         \\
     , .{
         cfg.language,
+        boolStr(cfg.autostart),
         boolStr(cfg.ignore_upper_case), boolStr(cfg.ignore_english), boolStr(cfg.enable_middle_mouse),
         cfg.hk_convert.mod,  cfg.hk_convert.vk,
         cfg.hk_reverse.mod,  cfg.hk_reverse.vk,
@@ -105,6 +108,8 @@ pub fn load(allocator: std.mem.Allocator) Config {
         const line = std.mem.trim(u8, raw, "\r \t");
         if (std.mem.startsWith(u8, line, "language=")) {
             cfg.language = std.fmt.parseInt(u32, line["language=".len..], 10) catch 0;
+        } else if (std.mem.startsWith(u8, line, "autostart=")) {
+            cfg.autostart = !std.mem.endsWith(u8, line, "=0");
         } else if (std.mem.startsWith(u8, line, "ignore_upper_case=")) {
             cfg.ignore_upper_case = !std.mem.endsWith(u8, line, "=0");
         } else if (std.mem.startsWith(u8, line, "ignore_english=")) {
@@ -142,14 +147,18 @@ pub fn hotkeyLabel(cfg: Hotkey, allocator: std.mem.Allocator) []u8 {
     if (cfg.mod & MOD_SHIFT != 0) parts.appendSlice("Shift+") catch return @constCast("");
     if (cfg.mod & MOD_ALT != 0) parts.appendSlice("Alt+") catch return @constCast("");
 
-    if (cfg.vk >= 0x70 and cfg.vk <= 0x7B) {
-        parts.appendSlice(vkName(cfg.vk)) catch return @constCast("");
-    } else if (cfg.vk >= 0x41 and cfg.vk <= 0x5A) {
-        parts.append(@intCast('A' + (cfg.vk - 0x41))) catch return @constCast("");
-    } else if (cfg.vk >= 0x30 and cfg.vk <= 0x39) {
-        parts.append(@intCast('0' + (cfg.vk - 0x30))) catch return @constCast("");
+    if (cfg.vk >= 0x70 and vkNameOk(vk)) {
+        parts.appendSlice(vkName(vk)) catch return @constCast("");
+    } else if (vk >= 0x41 and vk <= 0x5A) {
+        parts.append(@intCast('A' + (vk - 0x41))) catch return @constCast("");
+    } else if (vk >= 0x30 and vk <= 0x39) {
+        parts.append(@intCast('0' + (vk - 0x30))) catch return @constCast("");
     } else {
         parts.appendSlice("Key") catch return @constCast("");
     }
     return parts.toOwnedSlice() catch return @constCast("");
+}
+
+fn vkNameOk(vk: u32) bool {
+    return vk >= 0x70 and vk <= 0x7B;
 }
