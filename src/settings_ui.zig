@@ -17,6 +17,7 @@ const HBRUSH = ?*anyopaque;
 const HPEN = ?*anyopaque;
 const HGDIOBJ = ?*anyopaque;
 const HRGN = ?*anyopaque;
+const HHOOK = ?*anyopaque;
 
 const BTN_CHANGE_BASE: usize = 2101;
 const ID_CHK_UPPER: usize = 2001;
@@ -27,6 +28,7 @@ const ID_CLOSE: usize = 2302;
 const ID_LANG: usize = 2401;
 const ID_PICK_FA: usize = 9001;
 const ID_PICK_EN: usize = 9002;
+const CAPTURE_TIMER: usize = 999;
 
 const WS_POPUP: DWORD = 0x80000000;
 const WS_CHILD: DWORD = 0x40000000;
@@ -39,6 +41,7 @@ const WM_ERASEBKGND: UINT = 0x0014;
 const WM_CTLCOLORSTATIC: UINT = 0x0138;
 const WM_DRAWITEM: UINT = 0x002B;
 const WM_NCHITTEST: UINT = 0x0084;
+const WM_TIMER: UINT = 0x0113;
 const BM_GETCHECK: UINT = 0x00F0;
 const BM_SETCHECK: UINT = 0x00F1;
 const SW_SHOW: i32 = 5;
@@ -47,6 +50,7 @@ const HTCAPTION: LRESULT = 2;
 const DT_CENTER: u32 = 0x1;
 const DT_VCENTER: u32 = 0x4;
 const DT_SINGLELINE: u32 = 0x20;
+const WH_KEYBOARD_LL: i32 = 13;
 
 // 🎨 پالت رنگی
 fn rgb(r: u32, g: u32, b: u32) u32 {
@@ -87,6 +91,14 @@ const DRAWITEMSTRUCT = extern struct {
     itemData: usize,
 };
 
+const KBDLLHOOKSTRUCT = extern struct {
+    vkCode: DWORD,
+    scanCode: DWORD,
+    flags: DWORD,
+    time: DWORD,
+    dwExtraInfo: usize,
+};
+
 extern "user32" fn RegisterClassExW(w: *const WNDCLASSEXW) callconv(windows.WINAPI) u16;
 extern "user32" fn CreateWindowExW(a: DWORD, b: windows.LPCWSTR, c: windows.LPCWSTR, d: DWORD, e: i32, f: i32, g: i32, h: i32, i: ?HWND, j: ?windows.HMENU, k: ?HINSTANCE, l: ?*anyopaque) callconv(windows.WINAPI) ?HWND;
 extern "user32" fn DefWindowProcW(hWnd: HWND, Msg: UINT, w: WPARAM, l: LPARAM) callconv(windows.WINAPI) LRESULT;
@@ -103,6 +115,11 @@ extern "user32" fn FillRect(hdc: HDC, r: *const windows.RECT, b: HBRUSH) callcon
 extern "user32" fn DrawTextW(hdc: HDC, s: [*]const u16, c: i32, r: *windows.RECT, fmt: u32) callconv(windows.WINAPI) i32;
 extern "user32" fn GetWindowTextW(hWnd: HWND, s: [*]u16, c: i32) callconv(windows.WINAPI) i32;
 extern "user32" fn SetWindowRgn(hWnd: HWND, hRgn: HRGN, bRedraw: BOOL) callconv(windows.WINAPI) BOOL;
+extern "user32" fn SetWindowsHookExW(idHook: i32, lpfn: *const fn (i32, WPARAM, LPARAM) callconv(windows.WINAPI) LRESULT, hMod: ?HINSTANCE, dwThreadId: DWORD) callconv(windows.WINAPI) HHOOK;
+extern "user32" fn UnhookWindowsHookEx(h: HHOOK) callconv(windows.WINAPI) BOOL;
+extern "user32" fn CallNextHookEx(h: HHOOK, code: i32, wp: WPARAM, lp: LPARAM) callconv(windows.WINAPI) LRESULT;
+extern "user32" fn SetTimer(hWnd: ?HWND, nIDEvent: usize, uElapse: UINT, lpTimerFunc: ?*const fn (?HWND, UINT, usize, DWORD) callconv(windows.WINAPI) void) callconv(windows.WINAPI) usize;
+extern "user32" fn KillTimer(hWnd: ?HWND, uIDEvent: usize) callconv(windows.WINAPI) BOOL;
 extern "gdi32" fn CreateSolidBrush(c: u32) callconv(windows.WINAPI) HBRUSH;
 extern "gdi32" fn CreatePen(style: i32, width: i32, color: u32) callconv(windows.WINAPI) HPEN;
 extern "gdi32" fn CreateRoundRectRgn(l: i32, t: i32, r: i32, b: i32, wr: i32, hr: i32) callconv(windows.WINAPI) HRGN;
@@ -111,7 +128,6 @@ extern "gdi32" fn DeleteObject(o: HGDIOBJ) callconv(windows.WINAPI) BOOL;
 extern "gdi32" fn RoundRect(hdc: HDC, l: i32, t: i32, r: i32, b: i32, w: i32, h: i32) callconv(windows.WINAPI) BOOL;
 extern "gdi32" fn SetBkMode(hdc: HDC, mode: i32) callconv(windows.WINAPI) i32;
 extern "gdi32" fn SetTextColor(hdc: HDC, c: u32) callconv(windows.WINAPI) u32;
-extern "dwmapi" fn DwmSetWindowAttribute(hWnd: HWND, attr: DWORD, data: *const DWORD, size: DWORD) callconv(windows.WINAPI) i32;
 
 const WNDCLASSEXW = extern struct {
     cbSize: UINT, style: UINT,
@@ -128,13 +144,17 @@ const stcClsW = std.unicode.utf8ToUtf16LeStringLiteral("STATIC");
 
 var g_hInst: ?HINSTANCE = null;
 var g_parent: ?HWND = null;
+var g_settings_hwnd: ?HWND = null;
 var pending: config.Config = .{};
 var label_hwnds: [6]?HWND = .{ null, null, null, null, null, null };
 var lang_btn: ?HWND = null;
 var chk_hwnds: [3]?HWND = .{ null, null, null };
 var lang_choice: i32 = -1;
 
-// ✅ گوشه گرد واقعی روی همه ویندوزها (بدون فریم)
+// ✅ ضبط کلید بدون هنگ (هوک سراسری)
+var g_hook: HHOOK = null;
+var capturing: i32 = -1;
+
 fn roundRgn(hWnd: HWND, w: i32, h: i32) void {
     const rgn = CreateRoundRectRgn(0, 0, w + 1, h + 1, 28, 28) orelse return;
     _ = SetWindowRgn(hWnd, rgn, 1);
@@ -155,43 +175,6 @@ fn down(v: i32) bool {
 
 fn isModKey(v: u32) bool {
     return v == 0x10 or v == 0x11 or v == 0x12 or v == 0x1B or v == 0x5B or v == 0x5C;
-}
-
-// ✅ ضبط کلید: همه کلیدها + تایم‌اوت ۱۵ ثانیه (بدون هنگ)
-fn captureHotkey() config.Hotkey {
-    // صبر تا رها شدن همه کلیدها
-    var guard: u32 = 0;
-    while (guard < 300) : (guard += 1) {
-        var any = false;
-        var v: u32 = 1;
-        while (v < 0xFF) : (v += 1) {
-            if (down(@intCast(v))) {
-                any = true;
-                break;
-            }
-        }
-        if (!any) break;
-        std.time.sleep(10 * std.time.ns_per_ms);
-    }
-
-    // حداکثر ۱۵ ثانیه فرصت
-    var t: u32 = 0;
-    while (t < 1500) : (t += 1) {
-        if (down(0x1B)) return .{ .mod = 0, .vk = 0x1B }; // Escape = لغو
-
-        var mod: u32 = 0;
-        if (down(0x11)) mod |= config.MOD_CONTROL;
-        if (down(0x10)) mod |= config.MOD_SHIFT;
-        if (down(0x12)) mod |= config.MOD_ALT;
-
-        var v: u32 = 7; // رد شدن از دکمه‌های موس (1..6)
-        while (v < 0xFF) : (v += 1) {
-            if (isModKey(v)) continue;
-            if (down(@intCast(v))) return .{ .mod = mod, .vk = v };
-        }
-        std.time.sleep(10 * std.time.ns_per_ms);
-    }
-    return .{ .mod = 0, .vk = 0x1B }; // تایم‌اوت = لغو
 }
 
 fn getHotkeyPtr(i: usize) *config.Hotkey {
@@ -225,6 +208,49 @@ fn langLabel() []const u8 {
         lang.t("Language: Persian", "زبان: فارسی")
     else
         lang.t("Language: English", "زبان: English");
+}
+
+fn endCapture() void {
+    if (g_hook) |h| {
+        _ = UnhookWindowsHookEx(h);
+        g_hook = null;
+    }
+    if (g_settings_hwnd) |h| _ = KillTimer(h, CAPTURE_TIMER);
+    const idx = capturing;
+    capturing = -1;
+    if (idx >= 0) refreshLabel(@intCast(idx), std.heap.page_allocator);
+}
+
+// ✅ هوک کیبورد: هر کلیدی فوراً ضبط میشه، بدون مسدودسازی
+fn kbHookProc(code: i32, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT {
+    if (code >= 0 and capturing >= 0 and (wParam == 0x0100 or wParam == 0x0104)) {
+        const ks: *KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lParam)));
+        const vk = ks.vkCode;
+
+        if (vk == 0x1B) {
+            endCapture();
+            return 1;
+        }
+
+        if (!isModKey(vk)) {
+            var mod: u32 = 0;
+            if (down(0x11)) mod |= config.MOD_CONTROL;
+            if (down(0x10)) mod |= config.MOD_SHIFT;
+            if (down(0x12)) mod |= config.MOD_ALT;
+            getHotkeyPtr(@intCast(capturing)).* = .{ .mod = mod, .vk = vk };
+            endCapture();
+        }
+        return 1; // بلعیدن کلید حین ضبط
+    }
+    return CallNextHookEx(null, code, wParam, lParam);
+}
+
+fn startCapture(idx: usize) void {
+    if (capturing >= 0) return;
+    capturing = @intCast(idx);
+    setWide(label_hwnds[idx], "...");
+    g_hook = SetWindowsHookExW(WH_KEYBOARD_LL, kbHookProc, null, 0);
+    if (g_settings_hwnd) |h| _ = SetTimer(h, CAPTURE_TIMER, 15000, null);
 }
 
 fn addControl(parent: HWND, classW: windows.LPCWSTR, textUtf8: []const u8, style: DWORD, x: i32, y: i32, w: i32, h: i32, id: usize) ?HWND {
@@ -285,7 +311,7 @@ fn colorMessages(Msg: UINT, wParam: WPARAM, lParam: LPARAM) ?LRESULT {
 fn pickProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT {
     if (colorMessages(Msg, wParam, lParam)) |r| return r;
     switch (Msg) {
-        WM_NCHITTEST => return HTCAPTION, // جابه‌جایی با درگ
+        WM_NCHITTEST => return HTCAPTION,
         WM_COMMAND => {
             const id = wParam & 0xFFFF;
             if (id == ID_PICK_FA) {
@@ -324,7 +350,6 @@ pub fn pickLanguage(hInst: ?HINSTANCE) u32 {
     const title = mkWide(allocator, "LangReplace - زبان / Language") orelse return 0;
     defer allocator.free(title);
 
-    // ✅ بدون فریم (WS_POPUP)
     const hWnd = CreateWindowExW(WS_EX_TOPMOST, pickClsW, title, WS_POPUP | WS_VISIBLE, 400, 300, 420, 200, null, null, hInst, null) orelse return 0;
     roundRgn(hWnd, 420, 200);
 
@@ -348,16 +373,17 @@ fn settingsProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(
     if (colorMessages(Msg, wParam, lParam)) |r| return r;
     const allocator = std.heap.page_allocator;
     switch (Msg) {
-        WM_NCHITTEST => return HTCAPTION, // جابه‌جایی با درگ
+        WM_NCHITTEST => return HTCAPTION,
+        WM_TIMER => {
+            if (wParam == CAPTURE_TIMER and capturing >= 0) {
+                endCapture(); // تایم‌اوت ۱۵ ثانیه = لغو
+            }
+            return 0;
+        },
         WM_COMMAND => {
             const id = wParam & 0xFFFF;
             if (id >= BTN_CHANGE_BASE and id < BTN_CHANGE_BASE + 6) {
-                const idx = id - BTN_CHANGE_BASE;
-                const hk = captureHotkey();
-                if (hk.vk != 0x1B) {
-                    getHotkeyPtr(idx).* = hk;
-                    refreshLabel(idx, allocator);
-                }
+                startCapture(id - BTN_CHANGE_BASE);
                 return 0;
             }
             if (id == ID_LANG) {
@@ -366,6 +392,7 @@ fn settingsProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(
                 return 0;
             }
             if (id == ID_OK) {
+                endCapture();
                 if (chk_hwnds[0]) |h| pending.ignore_upper_case = (SendMessageW(h, BM_GETCHECK, 0, 0) != 0);
                 if (chk_hwnds[1]) |h| pending.ignore_english = (SendMessageW(h, BM_GETCHECK, 0, 0) != 0);
                 if (chk_hwnds[2]) |h| pending.enable_middle_mouse = (SendMessageW(h, BM_GETCHECK, 0, 0) != 0);
@@ -380,12 +407,14 @@ fn settingsProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(
                 return 0;
             }
             if (id == ID_CLOSE) {
+                endCapture();
                 _ = DestroyWindow(hWnd);
                 return 0;
             }
             return 0;
         },
         WM_CLOSE => {
+            endCapture();
             _ = DestroyWindow(hWnd);
             return 0;
         },
@@ -410,8 +439,8 @@ pub fn openSettings(hInst: ?HINSTANCE, parent: ?HWND) void {
     const title = mkWide(allocator, lang.t("LangReplace - Settings", "LangReplace - تنظیمات")) orelse return;
     defer allocator.free(title);
 
-    // ✅ بدون فریم
     const hWnd = CreateWindowExW(0, clsW, title, WS_POPUP | WS_VISIBLE, 100, 100, 470, 490, parent, null, hInst, null) orelse return;
+    g_settings_hwnd = hWnd;
     roundRgn(hWnd, 470, 490);
 
     chk_hwnds[0] = addControl(hWnd, btnClsW, lang.t("Ignore Upper case when converting", "نادیده گرفتن بزرگی حروف هنگام تبدیل"), BS_CHECKBOX, 20, 20, 410, 24, ID_CHK_UPPER);
@@ -448,7 +477,7 @@ pub fn openSettings(hInst: ?HINSTANCE, parent: ?HWND) void {
 
     lang_btn = addControl(hWnd, btnClsW, langLabel(), BS_OWNERDRAW, 20, 330, 190, 34, ID_LANG);
     _ = addControl(hWnd, btnClsW, lang.t("OK / Save", "تأیید / ذخیره"), BS_OWNERDRAW, 225, 330, 120, 34, ID_OK);
-    _ = addControl(hWnd, btnClsW, lang.t("✕", "✕"), BS_OWNERDRAW, 360, 330, 60, 34, ID_CLOSE);
+    _ = addControl(hWnd, btnClsW, lang.t("✕", ""), BS_OWNERDRAW, 360, 330, 60, 34, ID_CLOSE);
 
     _ = addControl(hWnd, stcClsW, lang.t("Programmer: Nikan Rayan 💜", "برنامه‌نویس: نیکان رایان 💜"), 0, 20, 420, 420, 24, 0);
 
