@@ -132,7 +132,8 @@ pub const TrayManager = struct {
         var b3: [64]u16 = undefined;
         var b4: [64]u16 = undefined;
         const settingsW = wideBuf(&b1, lang.t("Settings...", "تنظیمات..."));
-        const barW = wideBuf(&b2, lang.t("Show/Hide Bar", "نمایش/پنهان نوار"));
+        // ✅ تغییر نام منو
+        const barW = wideBuf(&b2, lang.t("Show/Hide Keys", "نمایش/پنهان کلیدها"));
         const aboutW = wideBuf(&b3, lang.t("About", "درباره"));
         const exitW = wideBuf(&b4, lang.t("Exit", "خروج"));
 
