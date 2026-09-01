@@ -147,18 +147,15 @@ pub fn hotkeyLabel(cfg: Hotkey, allocator: std.mem.Allocator) []u8 {
     if (cfg.mod & MOD_SHIFT != 0) parts.appendSlice("Shift+") catch return @constCast("");
     if (cfg.mod & MOD_ALT != 0) parts.appendSlice("Alt+") catch return @constCast("");
 
-    if (cfg.vk >= 0x70 and vkNameOk(vk)) {
-        parts.appendSlice(vkName(vk)) catch return @constCast("");
-    } else if (vk >= 0x41 and vk <= 0x5A) {
-        parts.append(@intCast('A' + (vk - 0x41))) catch return @constCast("");
-    } else if (vk >= 0x30 and vk <= 0x39) {
-        parts.append(@intCast('0' + (vk - 0x30))) catch return @constCast("");
+    // ✅ اصلاح: cfg.vk
+    if (cfg.vk >= 0x70 and cfg.vk <= 0x7B) {
+        parts.appendSlice(vkName(cfg.vk)) catch return @constCast("");
+    } else if (cfg.vk >= 0x41 and cfg.vk <= 0x5A) {
+        parts.append(@intCast('A' + (cfg.vk - 0x41))) catch return @constCast("");
+    } else if (cfg.vk >= 0x30 and cfg.vk <= 0x39) {
+        parts.append(@intCast('0' + (cfg.vk - 0x30))) catch return @constCast("");
     } else {
         parts.appendSlice("Key") catch return @constCast("");
     }
     return parts.toOwnedSlice() catch return @constCast("");
-}
-
-fn vkNameOk(vk: u32) bool {
-    return vk >= 0x70 and vk <= 0x7B;
 }
