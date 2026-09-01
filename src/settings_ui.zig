@@ -2,6 +2,7 @@ const std = @import("std");
 const windows = std.os.windows;
 const config = @import("config.zig");
 const lang = @import("lang.zig");
+const autostart = @import("autostart.zig");
 
 const HWND = windows.HWND;
 const UINT = windows.UINT;
@@ -23,6 +24,7 @@ const BTN_CHANGE_BASE: usize = 2101;
 const ID_CHK_UPPER: usize = 2001;
 const ID_CHK_ENG: usize = 2002;
 const ID_CHK_MOUSE: usize = 2003;
+const ID_CHK_AUTO: usize = 2004;
 const ID_OK: usize = 2301;
 const ID_CLOSE: usize = 2302;
 const ID_LANG: usize = 2401;
@@ -148,10 +150,8 @@ var g_settings_hwnd: ?HWND = null;
 var pending: config.Config = .{};
 var label_hwnds: [6]?HWND = .{ null, null, null, null, null, null };
 var lang_btn: ?HWND = null;
-var chk_hwnds: [3]?HWND = .{ null, null, null };
+var chk_hwnds: [4]?HWND = .{ null, null, null, null };
 var lang_choice: i32 = -1;
-
-// ✅ ضبط کلید بدون هنگ (هوک سراسری)
 var g_hook: HHOOK = null;
 var capturing: i32 = -1;
 
@@ -221,7 +221,6 @@ fn endCapture() void {
     if (idx >= 0) refreshLabel(@intCast(idx), std.heap.page_allocator);
 }
 
-// ✅ هوک کیبورد: هر کلیدی فوراً ضبط میشه، بدون مسدودسازی
 fn kbHookProc(code: i32, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT {
     if (code >= 0 and capturing >= 0 and (wParam == 0x0100 or wParam == 0x0104)) {
         const ks: *KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lParam)));
@@ -240,7 +239,7 @@ fn kbHookProc(code: i32, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI
             getHotkeyPtr(@intCast(capturing)).* = .{ .mod = mod, .vk = vk };
             endCapture();
         }
-        return 1; // بلعیدن کلید حین ضبط
+        return 1;
     }
     return CallNextHookEx(null, code, wParam, lParam);
 }
@@ -261,7 +260,6 @@ fn addControl(parent: HWND, classW: windows.LPCWSTR, textUtf8: []const u8, style
     return CreateWindowExW(0, classW, tw, WS_CHILD | WS_VISIBLE | style, x, y, w, h, parent, hMenu, g_hInst, null);
 }
 
-// 🎨 رنگ‌آمیزی مشترک
 fn colorMessages(Msg: UINT, wParam: WPARAM, lParam: LPARAM) ?LRESULT {
     switch (Msg) {
         WM_ERASEBKGND => {
@@ -376,7 +374,7 @@ fn settingsProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(
         WM_NCHITTEST => return HTCAPTION,
         WM_TIMER => {
             if (wParam == CAPTURE_TIMER and capturing >= 0) {
-                endCapture(); // تایم‌اوت ۱۵ ثانیه = لغو
+                endCapture();
             }
             return 0;
         },
@@ -396,6 +394,8 @@ fn settingsProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(
                 if (chk_hwnds[0]) |h| pending.ignore_upper_case = (SendMessageW(h, BM_GETCHECK, 0, 0) != 0);
                 if (chk_hwnds[1]) |h| pending.ignore_english = (SendMessageW(h, BM_GETCHECK, 0, 0) != 0);
                 if (chk_hwnds[2]) |h| pending.enable_middle_mouse = (SendMessageW(h, BM_GETCHECK, 0, 0) != 0);
+                if (chk_hwnds[3]) |h| pending.autostart = (SendMessageW(h, BM_GETCHECK, 0, 0) != 0);
+                autostart.setAutostart(pending.autostart);
                 config.g_config = pending;
                 config.save(pending, allocator);
                 if (g_parent) |p| {
@@ -426,6 +426,7 @@ pub fn openSettings(hInst: ?HINSTANCE, parent: ?HWND) void {
     g_hInst = hInst;
     g_parent = parent;
     pending = config.g_config;
+    pending.autostart = autostart.getAutostart();
     const allocator = std.heap.page_allocator;
 
     const wc: WNDCLASSEXW = .{
@@ -439,13 +440,14 @@ pub fn openSettings(hInst: ?HINSTANCE, parent: ?HWND) void {
     const title = mkWide(allocator, lang.t("LangReplace - Settings", "LangReplace - تنظیمات")) orelse return;
     defer allocator.free(title);
 
-    const hWnd = CreateWindowExW(0, clsW, title, WS_POPUP | WS_VISIBLE, 100, 100, 470, 490, parent, null, hInst, null) orelse return;
+    const hWnd = CreateWindowExW(0, clsW, title, WS_POPUP | WS_VISIBLE, 100, 80, 470, 520, parent, null, hInst, null) orelse return;
     g_settings_hwnd = hWnd;
-    roundRgn(hWnd, 470, 490);
+    roundRgn(hWnd, 470, 520);
 
     chk_hwnds[0] = addControl(hWnd, btnClsW, lang.t("Ignore Upper case when converting", "نادیده گرفتن بزرگی حروف هنگام تبدیل"), BS_CHECKBOX, 20, 20, 410, 24, ID_CHK_UPPER);
     chk_hwnds[1] = addControl(hWnd, btnClsW, lang.t("Ignore English when reversing text", "نادیده گرفتن انگلیسی هنگام معکوس کردن"), BS_CHECKBOX, 20, 48, 410, 24, ID_CHK_ENG);
     chk_hwnds[2] = addControl(hWnd, btnClsW, lang.t("Enable operation with mouse middle button", "فعال‌سازی با دکمه وسط موس"), BS_CHECKBOX, 20, 76, 410, 24, ID_CHK_MOUSE);
+    chk_hwnds[3] = addControl(hWnd, btnClsW, lang.t("Start with Windows (Auto-start)", "اجرا هنگام شروع ویندوز (آستارت خودکار)"), BS_CHECKBOX, 20, 104, 410, 24, ID_CHK_AUTO);
 
     if (pending.ignore_upper_case) {
         if (chk_hwnds[0]) |h| _ = SendMessageW(h, BM_SETCHECK, 1, 0);
@@ -455,6 +457,9 @@ pub fn openSettings(hInst: ?HINSTANCE, parent: ?HWND) void {
     }
     if (pending.enable_middle_mouse) {
         if (chk_hwnds[2]) |h| _ = SendMessageW(h, BM_SETCHECK, 1, 0);
+    }
+    if (pending.autostart) {
+        if (chk_hwnds[3]) |h| _ = SendMessageW(h, BM_SETCHECK, 1, 0);
     }
 
     const names = [_][]const u8{
@@ -468,18 +473,18 @@ pub fn openSettings(hInst: ?HINSTANCE, parent: ?HWND) void {
 
     var i: usize = 0;
     while (i < 6) : (i += 1) {
-        const y: i32 = @intCast(110 + i * 34);
+        const y: i32 = @intCast(140 + i * 34);
         _ = addControl(hWnd, btnClsW, lang.t("Change Key", "تغییر کلید"), BS_OWNERDRAW, 20, y, 100, 28, BTN_CHANGE_BASE + i);
         _ = addControl(hWnd, stcClsW, names[i], 0, 130, y + 5, 200, 22, 0);
         label_hwnds[i] = addControl(hWnd, stcClsW, "", 0, 350, y + 5, 90, 22, 3001 + i);
         refreshLabel(i, allocator);
     }
 
-    lang_btn = addControl(hWnd, btnClsW, langLabel(), BS_OWNERDRAW, 20, 330, 190, 34, ID_LANG);
-    _ = addControl(hWnd, btnClsW, lang.t("OK / Save", "تأیید / ذخیره"), BS_OWNERDRAW, 225, 330, 120, 34, ID_OK);
-    _ = addControl(hWnd, btnClsW, lang.t("✕", ""), BS_OWNERDRAW, 360, 330, 60, 34, ID_CLOSE);
+    lang_btn = addControl(hWnd, btnClsW, langLabel(), BS_OWNERDRAW, 20, 360, 190, 34, ID_LANG);
+    _ = addControl(hWnd, btnClsW, lang.t("OK / Save", "تأیید / ذخیره"), BS_OWNERDRAW, 225, 360, 120, 34, ID_OK);
+    _ = addControl(hWnd, btnClsW, lang.t("Close", "بستن"), BS_OWNERDRAW, 360, 360, 80, 34, ID_CLOSE);
 
-    _ = addControl(hWnd, stcClsW, lang.t("Programmer: Nikan Rayan 💜", "برنامه‌نویس: نیکان رایان 💜"), 0, 20, 420, 420, 24, 0);
+    _ = addControl(hWnd, stcClsW, lang.t("Programmer: Nikan Rayan 💜", "برنامه‌نویس: نیکان رایان 💜"), 0, 20, 460, 420, 24, 0);
 
     _ = ShowWindow(hWnd, SW_SHOW);
     _ = UpdateWindow(hWnd);
