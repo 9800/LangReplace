@@ -346,8 +346,9 @@ pub fn showSplash(hInst: ?HINSTANCE, icon: ?windows.HICON) void {
     const sh: i32 = 260;
     const screenW = GetSystemMetrics(SM_CXSCREEN);
     const screenH = GetSystemMetrics(SM_CYSCREEN);
-    const x = (screenW - sw) / 2;
-    const y = (screenH - sh) / 2;
+    // ✅ تقسیم صحیح اعداد علامت‌دار
+    const x = @divTrunc(screenW - sw, 2);
+    const y = @divTrunc(screenH - sh, 2);
 
     const titleW = mkWide(allocator, "LangReplace") orelse return;
     defer allocator.free(titleW);
@@ -360,7 +361,6 @@ pub fn showSplash(hInst: ?HINSTANCE, icon: ?windows.HICON) void {
 
     roundRgn(hWnd, sw, sh);
 
-    // آیکون (32x32)
     if (icon) |ic| {
         const emptyW = mkWide(allocator, "") orelse return;
         defer allocator.free(emptyW);
@@ -369,17 +369,9 @@ pub fn showSplash(hInst: ?HINSTANCE, icon: ?windows.HICON) void {
         }
     }
 
-    // Title بزرگ
     _ = addControl(hWnd, stcClsW, "LangReplace", 0, 110, 50, 300, 50, 0);
-    // Subtitle
     _ = addControl(hWnd, stcClsW, lang.t("Keyboard Layout Converter", "ابزار تبدیل چیدمان کیبورد"), 0, 110, 105, 300, 24, 0);
-    // Version
     _ = addControl(hWnd, stcClsW, "v1.0", 0, 110, 135, 300, 20, 0);
-
-    // خط جداکننده
-    // (با STATIC ساده نمی‌شه، فعلاً رد می‌کنیم)
-
-    // Programmer footer
     _ = addControl(hWnd, stcClsW, lang.t("Programmer: Nikan Rayan 💜", "برنامه‌نویس: نیکان رایان 💜"), 0, 30, 210, 380, 24, 0);
 
     in_splash = true;
@@ -391,7 +383,6 @@ pub fn showSplash(hInst: ?HINSTANCE, icon: ?windows.HICON) void {
     in_splash = false;
     _ = DestroyWindow(hWnd);
 
-    // پاک‌سازی صف پیام
     var msg: PMSG = undefined;
     while (PeekMessageW(&msg, null, 0, 0, PM_REMOVE) != 0) {
         _ = TranslateMessage(&msg);
