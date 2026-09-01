@@ -113,7 +113,6 @@ const PAINTSTRUCT = extern struct {
     rgbReserved: [32]u8,
 };
 
-// ✅ ساختار DRAWITEMSTRUCT (جا افتاده بود)
 const DRAWITEMSTRUCT = extern struct {
     CtlType: UINT,
     CtlID: UINT,
@@ -271,7 +270,9 @@ fn noteCopy() void {
 fn notePaste() void {
     const allocator = std.heap.page_allocator;
     const h = note_hwnd orelse return;
-    const clip = clipboard.getClipboardText(allocator) catch return;
+    // ✅ باز کردن مقدار optional
+    const clip_opt = clipboard.getClipboardText(allocator) catch return;
+    const clip = clip_opt orelse return;
     defer allocator.free(clip);
     const w = std.unicode.utf8ToUtf16LeAlloc(allocator, clip) catch return;
     defer allocator.free(w);
@@ -282,11 +283,14 @@ fn notePaste() void {
 
 fn noteSave() void {
     const allocator = std.heap.page_allocator;
-    const text = editTextAlloc(allocator) orelse "";
     const p = notePath(allocator);
+    const text = editTextAlloc(allocator);
+    defer if (text) |t| allocator.free(t);
     var f = std.fs.cwd().createFile(p, .{}) catch return;
     defer f.close();
-    f.writeAll(text) catch return;
+    if (text) |t| {
+        f.writeAll(t) catch return;
+    }
 }
 
 fn loadNote() void {
@@ -512,7 +516,6 @@ pub fn createBar(hInst: ?HINSTANCE, mainHwnd: ?HWND) void {
     const rgn = CreateRoundRectRgn(0, 0, BAR_W + 1, BAR_H + 1, 14, 14) orelse return;
     _ = SetWindowRgn(hWnd, rgn, 1);
 
-    // 📝 یادداشت
     const emptyW = std.unicode.utf8ToUtf16LeStringLiteral("");
     note_hwnd = CreateWindowExW(
         WS_EX_CLIENTEDGE, editClsW, emptyW,
@@ -521,7 +524,6 @@ pub fn createBar(hInst: ?HINSTANCE, mainHwnd: ?HWND) void {
         hWnd, @ptrFromInt(ID_NOTE), hInst, null,
     );
 
-    // دکمه‌های کپی/پیست/ذخیره
     const copyW = std.unicode.utf8ToUtf16LeStringLiteral("Copy");
     const pasteW = std.unicode.utf8ToUtf16LeStringLiteral("Paste");
     const saveW = std.unicode.utf8ToUtf16LeStringLiteral("Save");
