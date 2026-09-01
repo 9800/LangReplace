@@ -315,7 +315,8 @@ fn drawUsFlag(dc: HDC, r: windows.RECT) void {
 
     var i: i32 = 0;
     while (i < stripes) : (i += 1) {
-        const col = if (i % 2 == 0) rgb(179, 25, 66) else rgb(255, 255, 255);
+        // ✅ @rem به‌جای %
+        const col = if (@rem(i, 2) == 0) rgb(179, 25, 66) else rgb(255, 255, 255);
         const br = CreateSolidBrush(col);
         var sr = windows.RECT{ .left = r.left, .top = r.top + i * sh, .right = r.right, .bottom = r.top + (i + 1) * sh };
         if (i == stripes - 1) sr.bottom = r.bottom;
@@ -350,8 +351,7 @@ fn colorMessages(Msg: UINT, wParam: WPARAM, lParam: LPARAM) ?LRESULT {
         },
         WM_CTLCOLORSTATIC => {
             const hdc: HDC = @ptrFromInt(wParam);
-            const col = if (in_splash) COL_TEXT else COL_TEXT;
-            _ = SetTextColor(hdc, col);
+            _ = SetTextColor(hdc, COL_TEXT);
             _ = SetBkMode(hdc, 1);
             ensureBrushes();
             const br = if (in_splash) splash_brush else bg_brush;
@@ -433,11 +433,9 @@ pub fn showSplash(hInst: ?HINSTANCE, icon: ?windows.HICON) void {
 
     roundRgn(hWnd, sw, sh);
 
-    // نوار بالا: نسخه + نام
     _ = addControl(hWnd, stcClsW, "v1.0", 0, 15, 10, 80, 18, 0);
     _ = addControl(hWnd, stcClsW, lang.t("Keyboard Layout Converter", "ابزار تبدیل چیدمان کیبورد"), 0, 250, 10, 200, 18, 0);
 
-    // آیکون + عنوان
     if (icon) |ic| {
         const emptyW = mkWide(allocator, "") orelse return;
         defer allocator.free(emptyW);
@@ -448,7 +446,6 @@ pub fn showSplash(hInst: ?HINSTANCE, icon: ?windows.HICON) void {
     _ = addControl(hWnd, stcClsW, "LangReplace", 0, 110, 45, 320, 45, 0);
     _ = addControl(hWnd, stcClsW, lang.t("Fast & lightweight hotkey tools", "ابزارهای کلید میان‌بر، سریع و سبک"), 0, 110, 92, 320, 20, 0);
 
-    // 🚩 لیست قابلیت‌ها با پرچم
     const fy: i32 = 130;
     const row: i32 = 30;
 
@@ -464,7 +461,6 @@ pub fn showSplash(hInst: ?HINSTANCE, icon: ?windows.HICON) void {
     _ = addControl(hWnd, stcClsW, "", SS_OWNERDRAW, 30, fy + 3 * row + 2, 26, 17, ID_FLAG_US2);
     _ = addControl(hWnd, stcClsW, lang.t("(Ctrl+T) Translate", "(Ctrl+T) ترجمه"), 0, 64, fy + 3 * row, 380, 22, 0);
 
-    // پاورقی
     _ = addControl(hWnd, stcClsW, lang.t("Programmer: Nikan Rayan 💜", "برنامه‌نویس: نیکان رایان 💜"), 0, 30, 295, 410, 24, 0);
 
     in_splash = true;
