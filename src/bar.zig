@@ -185,7 +185,6 @@ fn toWideBuf(buf: []u16, s: []const u8) usize {
     return di;
 }
 
-// 🇮
 fn drawIranFlag(dc: HDC, r: windows.RECT) void {
     const h = r.bottom - r.top;
     const t3 = @divTrunc(h, 3);
@@ -203,7 +202,6 @@ fn drawIranFlag(dc: HDC, r: windows.RECT) void {
     _ = DeleteObject(rd);
 }
 
-// 🇺🇸
 fn drawUsFlag(dc: HDC, r: windows.RECT) void {
     const h = r.bottom - r.top;
     const w = r.right - r.left;
@@ -226,10 +224,8 @@ fn drawUsFlag(dc: HDC, r: windows.RECT) void {
 
 fn barProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT {
     switch (Msg) {
-        // ✅ بدون پاک‌سازی → بدون چشمک
         WM_ERASEBKGND => return 1,
         WM_TIMER => {
-            // ✅ فقط وقتی چیزی عوض شد redraw کن
             var changed = false;
             var i: usize = 0;
             while (i < 6) : (i += 1) {
@@ -246,7 +242,6 @@ fn barProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windo
             var ps: PAINTSTRUCT = undefined;
             const dc = BeginPaint(hWnd, &ps);
             if (dc) |hdc| {
-                // پس‌زمینه یکپارچه
                 var bgr = windows.RECT{ .left = 0, .top = 0, .right = BAR_W, .bottom = BAR_H };
                 const bb = CreateSolidBrush(COL_BAR);
                 _ = FillRect(hdc, &bgr, bb);
@@ -271,8 +266,8 @@ fn barProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windo
                     _ = DrawTextW(hdc, &buf, -1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
                     if (i == 0) {
-                        // ✅ پرچم زبان فعال + چراغ
-                        var fr = windows.RECT{ .left = x + 5, .top = 24, .right = x + 27, .bottom = 37 };
+                        // ✅ پرچم زبان فعال (const چون تغییر نمی‌کنه)
+                        const fr = windows.RECT{ .left = x + 5, .top = 24, .right = x + 27, .bottom = 37 };
                         if (isFaLayout()) {
                             drawIranFlag(hdc, fr);
                         } else {
@@ -318,7 +313,6 @@ fn barProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windo
                     _ = InvalidateRect(hWnd, null, 0);
                 }
             }
-            // ✅ کلیک = عمل + قابلیت درگ
             _ = ReleaseCapture();
             _ = SendMessageW(hWnd, WM_NCLBUTTONDOWN, @as(WPARAM, @intCast(HTCAPTION)), lParam);
             return 0;
