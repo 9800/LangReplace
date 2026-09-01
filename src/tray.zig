@@ -31,7 +31,7 @@ const NIIF_INFO: DWORD = 1;
 const WM_USER: UINT = 0x0400;
 pub const WM_TRAYICON: UINT = WM_USER + 1;
 pub const WM_RBUTTONUP: UINT = 0x0205;
-pub const WM_LBUTTONUP: UINT = 0x0202; // ✅ مقدار صحیح
+pub const WM_LBUTTONUP: UINT = 0x0202;
 const MF_STRING: UINT = 0;
 const TPM_RIGHTBUTTON: UINT = 0x0002;
 const TPM_RETURNCMD: UINT = 0x0080;
@@ -40,6 +40,7 @@ const TPM_BOTTOMALIGN: UINT = 0x0020;
 pub const MENU_ID_SETTINGS: UINT_PTR = 1001;
 pub const MENU_ID_ABOUT: UINT_PTR = 1002;
 pub const MENU_ID_EXIT: UINT_PTR = 1003;
+pub const MENU_ID_BAR: UINT_PTR = 1004;
 
 const GUID = extern struct { a: u32, b: u16, c: u16, d: [8]u8 };
 
@@ -129,11 +130,14 @@ pub const TrayManager = struct {
         var b1: [64]u16 = undefined;
         var b2: [64]u16 = undefined;
         var b3: [64]u16 = undefined;
+        var b4: [64]u16 = undefined;
         const settingsW = wideBuf(&b1, lang.t("Settings...", "تنظیمات..."));
-        const aboutW = wideBuf(&b2, lang.t("About", "درباره"));
-        const exitW = wideBuf(&b3, lang.t("Exit", "خروج"));
+        const barW = wideBuf(&b2, lang.t("Show/Hide Bar", "نمایش/پنهان نوار"));
+        const aboutW = wideBuf(&b3, lang.t("About", "درباره"));
+        const exitW = wideBuf(&b4, lang.t("Exit", "خروج"));
 
         _ = AppendMenuW(hMenu, MF_STRING, MENU_ID_SETTINGS, settingsW);
+        _ = AppendMenuW(hMenu, MF_STRING, MENU_ID_BAR, barW);
         _ = AppendMenuW(hMenu, MF_STRING, MENU_ID_ABOUT, aboutW);
         _ = AppendMenuW(hMenu, MF_STRING, MENU_ID_EXIT, exitW);
 
