@@ -1,27 +1,41 @@
-name: Build LangReplace
+name: Build
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, master ]
 
 jobs:
-  build-windows:
+  build:
     runs-on: windows-latest
+
     steps:
-      - uses: actions/checkout@v4
-      
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
+        uses: goto-bus-action/setup-zig@v3
         with:
           version: 0.13.0
-      
-      - name: Build
+
+      - name: Build LangReplace
         run: zig build -Doptimize=ReleaseSmall
-      
-      - name: Upload Artifact
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress
+
+      - name: Build Installer
+        run: & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\LangReplace.iss"
+
+      - name: Upload Portable App
         uses: actions/upload-artifact@v4
         with:
-          name: langreplace-windows
-          path: zig-out/bin/LangReplace.exe
+          name: LangReplace
+          path: zig-out\bin\LangReplace.exe
+
+      - name: Upload Installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: LangReplace-Setup
+          path: installer\Output\LangReplace-Setup.exe
