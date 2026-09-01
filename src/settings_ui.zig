@@ -42,6 +42,7 @@ const WS_VISIBLE: DWORD = 0x10000000;
 const BS_CHECKBOX: DWORD = 0x3;
 const BS_OWNERDRAW: DWORD = 0xB;
 const SS_OWNERDRAW: DWORD = 0xD;
+const SS_CENTER: DWORD = 0x1;
 const WM_CLOSE: UINT = 0x0010;
 const WM_COMMAND: UINT = 0x0111;
 const WM_ERASEBKGND: UINT = 0x0014;
@@ -315,7 +316,6 @@ fn drawUsFlag(dc: HDC, r: windows.RECT) void {
 
     var i: i32 = 0;
     while (i < stripes) : (i += 1) {
-        // ✅ @rem به‌جای %
         const col = if (@rem(i, 2) == 0) rgb(179, 25, 66) else rgb(255, 255, 255);
         const br = CreateSolidBrush(col);
         var sr = windows.RECT{ .left = r.left, .top = r.top + i * sh, .right = r.right, .bottom = r.top + (i + 1) * sh };
@@ -362,7 +362,6 @@ fn colorMessages(Msg: UINT, wParam: WPARAM, lParam: LPARAM) ?LRESULT {
             if (dis.hDC) |dc| {
                 const id = dis.CtlID;
 
-                // 🚩 پرچم‌ها
                 if (id == ID_FLAG_IR1 or id == ID_FLAG_IR2) {
                     drawIranFlag(dc, dis.rcItem);
                     return 1;
@@ -404,6 +403,7 @@ fn splashProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(wi
     return DefWindowProcW(hWnd, Msg, wParam, lParam);
 }
 
+// ✅ اسپلش وسط‌چین
 pub fn showSplash(hInst: ?HINSTANCE, icon: ?windows.HICON) void {
     const allocator = std.heap.page_allocator;
 
@@ -436,32 +436,38 @@ pub fn showSplash(hInst: ?HINSTANCE, icon: ?windows.HICON) void {
     _ = addControl(hWnd, stcClsW, "v1.0", 0, 15, 10, 80, 18, 0);
     _ = addControl(hWnd, stcClsW, lang.t("Keyboard Layout Converter", "ابزار تبدیل چیدمان کیبورد"), 0, 250, 10, 200, 18, 0);
 
+    // آیکون وسط
     if (icon) |ic| {
         const emptyW = mkWide(allocator, "") orelse return;
         defer allocator.free(emptyW);
-        if (CreateWindowExW(0, stcClsW, emptyW, WS_CHILD | WS_VISIBLE | SS_ICON | SS_CENTERIMAGE, 30, 40, 64, 64, hWnd, null, hInst, null)) |icHwnd| {
+        if (CreateWindowExW(0, stcClsW, emptyW, WS_CHILD | WS_VISIBLE | SS_ICON | SS_CENTERIMAGE, @divTrunc(sw - 64, 2), 32, 64, 64, hWnd, null, hInst, null)) |icHwnd| {
             _ = SendMessageW(icHwnd, STM_SETICON, @intFromPtr(ic), 0);
         }
     }
-    _ = addControl(hWnd, stcClsW, "LangReplace", 0, 110, 45, 320, 45, 0);
-    _ = addControl(hWnd, stcClsW, lang.t("Fast & lightweight hotkey tools", "ابزارهای کلید میان‌بر، سریع و سبک"), 0, 110, 92, 320, 20, 0);
 
-    const fy: i32 = 130;
-    const row: i32 = 30;
+    // عنوان و زیرعنوان وسط‌چین
+    _ = addControl(hWnd, stcClsW, "LangReplace", SS_CENTER, 20, 102, 430, 42, 0);
+    _ = addControl(hWnd, stcClsW, lang.t("Fast & lightweight hotkey tools", "ابزارهای کلید میان‌بر، سریع و سبک"), SS_CENTER, 20, 146, 430, 20, 0);
 
-    _ = addControl(hWnd, stcClsW, "", SS_OWNERDRAW, 30, fy + 2, 26, 17, ID_FLAG_IR1);
-    _ = addControl(hWnd, stcClsW, lang.t("(F10) Convert  abc <-> FA", "(F10) تبدیل  abc <-> فارسی"), 0, 64, fy, 380, 22, 0);
+    // ردیف‌های قابلیت وسط‌چین (پرچم + متن)
+    const fy: i32 = 178;
+    const row: i32 = 28;
+    const flagX: i32 = 68;
 
-    _ = addControl(hWnd, stcClsW, "", SS_OWNERDRAW, 30, fy + row + 2, 26, 17, ID_FLAG_IR2);
-    _ = addControl(hWnd, stcClsW, lang.t("(F6) Reverse text", "(F6) معکوس کردن متن"), 0, 64, fy + row, 380, 22, 0);
+    _ = addControl(hWnd, stcClsW, "", SS_OWNERDRAW, flagX, fy + 2, 26, 17, ID_FLAG_IR1);
+    _ = addControl(hWnd, stcClsW, lang.t("(F10) Convert  abc <-> FA", "(F10) تبدیل  abc <-> فارسی"), SS_CENTER, 102, fy, 300, 22, 0);
 
-    _ = addControl(hWnd, stcClsW, "", SS_OWNERDRAW, 30, fy + 2 * row + 2, 26, 17, ID_FLAG_US1);
-    _ = addControl(hWnd, stcClsW, "(Ctrl+G) Search in Google", 0, 64, fy + 2 * row, 380, 22, 0);
+    _ = addControl(hWnd, stcClsW, "", SS_OWNERDRAW, flagX, fy + row + 2, 26, 17, ID_FLAG_IR2);
+    _ = addControl(hWnd, stcClsW, lang.t("(F6) Reverse text", "(F6) معکوس کردن متن"), SS_CENTER, 102, fy + row, 300, 22, 0);
 
-    _ = addControl(hWnd, stcClsW, "", SS_OWNERDRAW, 30, fy + 3 * row + 2, 26, 17, ID_FLAG_US2);
-    _ = addControl(hWnd, stcClsW, lang.t("(Ctrl+T) Translate", "(Ctrl+T) ترجمه"), 0, 64, fy + 3 * row, 380, 22, 0);
+    _ = addControl(hWnd, stcClsW, "", SS_OWNERDRAW, flagX, fy + 2 * row + 2, 26, 17, ID_FLAG_US1);
+    _ = addControl(hWnd, stcClsW, "(Ctrl+G) Search in Google", SS_CENTER, 102, fy + 2 * row, 300, 22, 0);
 
-    _ = addControl(hWnd, stcClsW, lang.t("Programmer: Nikan Rayan 💜", "برنامه‌نویس: نیکان رایان 💜"), 0, 30, 295, 410, 24, 0);
+    _ = addControl(hWnd, stcClsW, "", SS_OWNERDRAW, flagX, fy + 3 * row + 2, 26, 17, ID_FLAG_US2);
+    _ = addControl(hWnd, stcClsW, lang.t("(Ctrl+T) Translate", "(Ctrl+T) ترجمه"), SS_CENTER, 102, fy + 3 * row, 300, 22, 0);
+
+    // پاورقی وسط‌چین
+    _ = addControl(hWnd, stcClsW, lang.t("Programmer: Nikan Rayan 💜", "برنامه‌نویس: نیکان رایان 💜"), SS_CENTER, 20, 298, 430, 24, 0);
 
     in_splash = true;
     _ = ShowWindow(hWnd, SW_SHOW);
