@@ -462,9 +462,10 @@ pub fn openSettings(hInst: ?HINSTANCE, parent: ?HWND) void {
         if (chk_hwnds[3]) |h| _ = SendMessageW(h, BM_SETCHECK, 1, 0);
     }
 
+    // ✅ برچسب F6 اصلاح شد: معکوس کردن متن
     const names = [_][]const u8{
         lang.t("Convert  abc <-> FA", "تبدیل  abc <-> فارسی"),
-        lang.t("Reverse  FA <-> abc", "معکوس  فارسی <-> abc"),
+        lang.t("Reverse text (abc->cba)", "معکوس متن (سلام -> مالس)"),
         lang.t("Case     abc <-> ABC", "بزرگی  abc <-> ABC"),
         lang.t("Search in Google", "جستجو در گوگل"),
         lang.t("Translate", "ترجمه"),
