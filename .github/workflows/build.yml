@@ -5,10 +5,14 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
+  release:
+    types: [ published ]
 
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -28,14 +32,47 @@ jobs:
       - name: Build Installer
         run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\LangReplace.iss"'
 
-      - name: Upload Portable App
-        uses: actions/upload-artifact@v4
-        with:
-          name: LangReplace
-          path: zig-out/bin/LangReplace.exe
+      # ✅ بررسی اینکه فایل‌ها واقعاً ساخته شدن
+      - name: Verify build outputs
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "zig-out/bin/LangReplace.exe")) {
+            Write-Error "LangReplace.exe not found!"
+            exit 1
+          }
+          if (-not (Test-Path "installer/Output/LangReplace-Setup.exe")) {
+            Write-Error "LangReplace-Setup.exe not found!"
+            exit 1
+          }
+          Write-Host "✓ Both files verified"
+          Get-Item "zig-out/bin/LangReplace.exe" | Select-Object Name, Length
+          Get-Item "installer/Output/LangReplace-Setup.exe" | Select-Object Name, Length
 
-      - name: Upload Installer
+      # ✅ کپی به پوشه release با نام‌های واضح
+      - name: Prepare release files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "release" -Force | Out-Null
+          Copy-Item "zig-out/bin/LangReplace.exe" "release/LangReplace-Portable.exe"
+          Copy-Item "installer/Output/LangReplace-Setup.exe" "release/LangReplace-Setup.exe"
+          Get-ChildItem "release" | Select-Object Name, Length
+
+      # 📥 Artifact (برای push معمولی — همیشه zip میشه)
+      - name: Upload Artifacts
+        if: github.event_name != 'release'
         uses: actions/upload-artifact@v4
         with:
-          name: LangReplace-Setup
-          path: installer/Output/LangReplace-Setup.exe
+          name: LangReplace-Build
+          path: release/
+
+      # 🚀 Release Assets (فایل خام، بدون زیپ)
+      - name: Attach files to Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/LangReplace-Portable.exe
+            release/LangReplace-Setup.exe
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
