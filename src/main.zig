@@ -99,7 +99,6 @@ fn toWideZ(allocator: std.mem.Allocator, s: []const u8) ?[:0]u16 {
     return z[0..w.len :0];
 }
 
-// ✅ درباره برنامه + تشکر (کلیک چپ روی آیکون و منوی درباره)
 fn showAbout(hWnd: HWND) void {
     const allocator = std.heap.page_allocator;
     const body = lang.t(
@@ -136,7 +135,7 @@ fn waitForClipboardChange(old_seq: DWORD) bool {
 }
 
 fn convertByMode(text: []const u8, force_english: bool, allocator: std.mem.Allocator) ?[]u8 {
-    if (force_english) return converter.convertText(text, .persian, .english, allocator) catch null;
+    _ = force_english;
     const layout = converter.detectLayout(text);
     const target: converter.KeyboardLayout = if (layout == .persian) .english else .persian;
     return converter.convertText(text, layout, target, allocator) catch null;
@@ -157,6 +156,31 @@ fn swapCaseText(text: []const u8, allocator: std.mem.Allocator) ![]u8 {
     return out.toOwnedSlice();
 }
 
+// ✅ F6: معکوس کردن ترتیب حروف (سلام → مالس / hello → olleh)
+fn reverseText(text: []const u8, allocator: std.mem.Allocator) ![]u8 {
+    var cps = std.ArrayList(u21).init(allocator);
+    defer cps.deinit();
+
+    var view = try std.unicode.Utf8View.init(text);
+    var it = view.iterator();
+    while (it.nextCodepoint()) |cp| {
+        try cps.append(cp);
+    }
+
+    var out = std.ArrayList(u8).init(allocator);
+    errdefer out.deinit();
+
+    var i: usize = cps.items.len;
+    while (i > 0) {
+        i -= 1;
+        var buf: [4]u8 = undefined;
+        const n = try std.unicode.utf8Encode(cps.items[i], &buf);
+        try out.appendSlice(buf[0..n]);
+    }
+
+    return out.toOwnedSlice();
+}
+
 fn readLineNow(allocator: std.mem.Allocator) ?[]u8 {
     keyboard.selectCurrentLine();
     std.time.sleep(30 * std.time.ns_per_ms);
@@ -173,8 +197,11 @@ fn writeOverSelection(converted: []const u8, allocator: std.mem.Allocator) void 
 }
 
 fn doConvert(id: hotkey.HotkeyId, text: []const u8, allocator: std.mem.Allocator) ?[]u8 {
-    if (id == .convert_case) return swapCaseText(text, allocator) catch null;
-    return convertByMode(text, id == .convert_reverse, allocator);
+    return switch (id) {
+        .convert_case => swapCaseText(text, allocator) catch null,
+        .convert_reverse => reverseText(text, allocator) catch null,
+        else => convertByMode(text, false, allocator),
+    };
 }
 
 fn handleHotkey(id: hotkey.HotkeyId) void {
@@ -335,7 +362,6 @@ fn windowProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(wi
                     if (cmd != 0) handleMenuCommand(cmd, hWnd);
                 }
             } else if (mouse_msg == tray.WM_LBUTTONUP) {
-                // ✅ کلیک چپ روی آیکون = درباره + تشکر
                 showAbout(hWnd);
             }
             return 0;
