@@ -38,6 +38,8 @@ const DT_CENTER: u32 = 0x1;
 const DT_VCENTER: u32 = 0x4;
 const DT_SINGLELINE: u32 = 0x20;
 const WM_INPUTLANGCHANGEREQUEST: UINT = 0x0050;
+const KEYEVENTF_EXTENDEDKEY: DWORD = 0x0001;
+const KEYEVENTF_KEYUP: DWORD = 0x0002;
 
 extern "user32" fn RegisterClassExW(w: *const WNDCLASSEXW) callconv(windows.WINAPI) u16;
 extern "user32" fn CreateWindowExW(a: DWORD, b: windows.LPCWSTR, c: windows.LPCWSTR, d: DWORD, e: i32, f: i32, g: i32, h: i32, i: ?HWND, j: ?windows.HMENU, k: ?HINSTANCE, l: ?*anyopaque) callconv(windows.WINAPI) ?HWND;
@@ -61,6 +63,7 @@ extern "user32" fn FrameRect(hdc: HDC, r: *const windows.RECT, b: HBRUSH) callco
 extern "user32" fn DrawTextW(hdc: HDC, s: [*]const u16, c: i32, r: *windows.RECT, fmt: u32) callconv(windows.WINAPI) i32;
 extern "user32" fn SetWindowRgn(hWnd: HWND, hRgn: HRGN, b: BOOL) callconv(windows.WINAPI) BOOL;
 extern "user32" fn SendInput(c: UINT, p: *INPUT, size: i32) callconv(windows.WINAPI) UINT;
+extern "user32" fn MapVirtualKeyW(code: u32, mapType: u32) callconv(windows.WINAPI) u32;
 extern "gdi32" fn CreateSolidBrush(c: u32) callconv(windows.WINAPI) HBRUSH;
 extern "gdi32" fn CreateRoundRectRgn(l: i32, t: i32, r: i32, b: i32, w: i32, h: i32) callconv(windows.WINAPI) HRGN;
 extern "gdi32" fn RoundRect(hdc: HDC, l: i32, t: i32, r: i32, b: i32, w: i32, h: i32) callconv(windows.WINAPI) BOOL;
@@ -122,12 +125,18 @@ fn isFaLayout() bool {
     return id == 0x0429;
 }
 
+// ✅ شبیه‌سازی واقعی کلید قفل: اسکن‌کد + Extended + فاصله down/up
 fn tapKey(vk: u16) void {
-    var inputs: [2]INPUT = .{
-        .{ .type = 1, .u = .{ .ki = .{ .wVk = vk, .wScan = 0, .dwFlags = 0, .time = 0, .dwExtraInfo = 0 } } },
-        .{ .type = 1, .u = .{ .ki = .{ .wVk = vk, .wScan = 0, .dwFlags = 2, .time = 0, .dwExtraInfo = 0 } } },
-    };
-    _ = SendInput(2, &inputs[0], @sizeOf(INPUT));
+    const scan: u16 = @intCast(MapVirtualKeyW(vk, 0));
+    const ext: DWORD = if (vk == 0x2D or vk == 0x90) KEYEVENTF_EXTENDEDKEY else 0;
+
+    var d: [1]INPUT = .{.{ .type = 1, .u = .{ .ki = .{ .wVk = vk, .wScan = scan, .dwFlags = ext, .time = 0, .dwExtraInfo = 0 } } }};
+    _ = SendInput(1, &d, @sizeOf(INPUT));
+
+    std.time.sleep(50 * std.time.ns_per_ms);
+
+    var u: [1]INPUT = .{.{ .type = 1, .u = .{ .ki = .{ .wVk = vk, .wScan = scan, .dwFlags = ext | KEYEVENTF_KEYUP, .time = 0, .dwExtraInfo = 0 } } }};
+    _ = SendInput(1, &u, @sizeOf(INPUT));
 }
 
 fn toggleLayout() void {
@@ -266,7 +275,6 @@ fn barProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windo
                     _ = DrawTextW(hdc, &buf, -1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
                     if (i == 0) {
-                        // ✅ پرچم زبان فعال (const چون تغییر نمی‌کنه)
                         const fr = windows.RECT{ .left = x + 5, .top = 24, .right = x + 27, .bottom = 37 };
                         if (isFaLayout()) {
                             drawIranFlag(hdc, fr);
