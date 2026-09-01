@@ -10,6 +10,7 @@ const keyboard = @import("keyboard.zig");
 const translate = @import("translate.zig");
 const config = @import("config.zig");
 const settings_ui = @import("settings_ui.zig");
+const bar = @import("bar.zig");
 const lang = @import("lang.zig");
 
 const HWND = windows.HWND;
@@ -339,6 +340,9 @@ fn handleMenuCommand(cmd: usize, hWnd: HWND) void {
         tray.MENU_ID_SETTINGS => {
             settings_ui.openSettings(g_hInstance, hWnd);
         },
+        tray.MENU_ID_BAR => {
+            bar.toggleBarVisible();
+        },
         tray.MENU_ID_ABOUT => {
             showAbout(hWnd);
         },
@@ -400,7 +404,6 @@ pub fn main() !void {
     config.g_config = config.load(std.heap.page_allocator);
     firstRunLanguage();
 
-    // ✅ نمایش صفحه خوش‌آمدگویی (۳ ثانیه)
     settings_ui.showSplash(g_hInstance, g_icon);
 
     const wc: WNDCLASSEXW = .{
@@ -428,6 +431,9 @@ pub fn main() !void {
 
     g_tray = try tray.TrayManager.init(hWnd, g_icon);
     _ = hotkey.registerHotkeys(hWnd, config.g_config);
+
+    // ✅ نوار وضعیت شناور
+    bar.createBar(g_hInstance, hWnd);
 
     _ = ShowWindow(hWnd, SW_HIDE);
     _ = UpdateWindow(hWnd);
