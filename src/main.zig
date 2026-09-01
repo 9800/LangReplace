@@ -194,7 +194,6 @@ fn writeOverSelection(converted: []const u8, allocator: std.mem.Allocator) void 
     keyboard.typeUnicodeText(converted, allocator);
 }
 
-// ✅ پاک‌سازی انتهای هر عملیات: تثبیت + جمع کردن selection
 fn settleAndClean() void {
     std.time.sleep(40 * std.time.ns_per_ms);
     keyboard.collapseSelection();
@@ -280,7 +279,7 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
                 defer allocator.free(converted);
                 if (std.mem.eql(u8, converted, t)) return;
                 writeOverSelection(converted, allocator);
-                settleAndClean(); // ✅
+                settleAndClean();
                 notify(lang.t("✓ Converted", "✓ تبدیل شد"));
                 return;
             }
@@ -316,7 +315,7 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
 
     const line_now = readLineNow(allocator) orelse {
         logWrite("VERIFY: null");
-        settleAndClean(); // ✅
+        settleAndClean();
         notify(lang.t("✓ Converted", "✓ تبدیل شد"));
         return;
     };
@@ -324,14 +323,14 @@ fn handleHotkey(id: hotkey.HotkeyId) void {
 
     if (std.mem.eql(u8, line_now, converted)) {
         logWrite("VERIFY: match");
-        settleAndClean(); // ✅
+        settleAndClean();
         notify(lang.t("✓ Converted", "✓ تبدیل شد"));
         return;
     }
 
     logWrite("VERIFY: mismatch -> rewrite");
     writeOverSelection(converted, allocator);
-    settleAndClean(); // ✅
+    settleAndClean();
     notify(lang.t("✓ Converted (fallback)", "✓ تبدیل شد (پشتیبان)"));
 }
 
@@ -400,6 +399,9 @@ pub fn main() !void {
     g_icon = loadAppIcon();
     config.g_config = config.load(std.heap.page_allocator);
     firstRunLanguage();
+
+    // ✅ نمایش صفحه خوش‌آمدگویی (۳ ثانیه)
+    settings_ui.showSplash(g_hInstance, g_icon);
 
     const wc: WNDCLASSEXW = .{
         .cbSize = @sizeOf(WNDCLASSEXW),
