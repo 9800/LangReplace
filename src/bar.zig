@@ -167,9 +167,9 @@ fn segLabel(i: usize) []const u8 {
     };
 }
 
-fn toWideBuf(buf: []u16, s: []const u8) [:0]u16 {
+fn toWideBuf(buf: []u16, s: []const u8) usize {
     var di: usize = 0;
-    var view = std.unicode.Utf8View.init(s) catch return buf[0..0 :0];
+    var view = std.unicode.Utf8View.init(s) catch return 0;
     var it = view.iterator();
     while (it.nextCodepoint()) |cp| {
         if (di >= buf.len - 1) break;
@@ -179,12 +179,12 @@ fn toWideBuf(buf: []u16, s: []const u8) [:0]u16 {
         }
     }
     buf[di] = 0;
-    return buf[0..di :0];
+    return di;
 }
 
 fn barProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT {
     switch (Msg) {
-        WM_NCHITTEST => return HTCAPTION, // جابه‌جایی با درگ
+        WM_NCHITTEST => return HTCAPTION,
         WM_TIMER => {
             _ = InvalidateRect(hWnd, null, 1);
             return 0;
@@ -204,7 +204,6 @@ fn barProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windo
                 var i: usize = 0;
                 while (i < 6) : (i += 1) {
                     const x: i32 = @intCast(4 + i * (SEG_W + 2));
-                    // بدنه سگمنت
                     var sr = windows.RECT{ .left = x, .top = 3, .right = x + SEG_W, .bottom = BAR_H - 3 };
                     const sb = CreateSolidBrush(COL_SEG);
                     _ = FillRect(hdc, &sr, sb);
@@ -212,14 +211,15 @@ fn barProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windo
                     const bd = CreateSolidBrush(rgb(150, 165, 195));
                     _ = FrameRect(hdc, &sr, bd);
                     _ = DeleteObject(bd);
-                    // برچسب
+
+                    // ✅ برچسب: نوشتن در بافر و ارسال &buf
                     var buf: [16]u16 = undefined;
-                    const lbl = toWideBuf(&buf, segLabel(i));
+                    _ = toWideBuf(&buf, segLabel(i));
                     _ = SetBkMode(hdc, 1);
                     _ = SetTextColor(hdc, COL_LABEL);
                     var tr = windows.RECT{ .left = x, .top = 4, .right = x + SEG_W, .bottom = 20 };
-                    _ = DrawTextW(hdc, lbl, -1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                    // چراغ وضعیت
+                    _ = DrawTextW(hdc, &buf, -1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
                     const on = isOn(i);
                     const ledCol = if (on) COL_ON else (if (i == 5) COL_OFFLR else COL_OFF);
                     var lr = windows.RECT{ .left = x + 8, .top = 25, .right = x + SEG_W - 8, .bottom = 36 };
