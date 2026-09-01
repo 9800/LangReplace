@@ -131,12 +131,12 @@ fn tapKey(vk: u16) void {
     const ext: DWORD = if (vk == 0x2D or vk == 0x90) KEYEVENTF_EXTENDEDKEY else 0;
 
     var d: [1]INPUT = .{.{ .type = 1, .u = .{ .ki = .{ .wVk = vk, .wScan = scan, .dwFlags = ext, .time = 0, .dwExtraInfo = 0 } } }};
-    _ = SendInput(1, &d, @sizeOf(INPUT));
+    _ = SendInput(1, &d[0], @sizeOf(INPUT));
 
     std.time.sleep(50 * std.time.ns_per_ms);
 
     var u: [1]INPUT = .{.{ .type = 1, .u = .{ .ki = .{ .wVk = vk, .wScan = scan, .dwFlags = ext | KEYEVENTF_KEYUP, .time = 0, .dwExtraInfo = 0 } } }};
-    _ = SendInput(1, &u, @sizeOf(INPUT));
+    _ = SendInput(1, &u[0], @sizeOf(INPUT));
 }
 
 fn toggleLayout() void {
