@@ -46,6 +46,7 @@ const WM_NCHITTEST: UINT = 0x0084;
 const WM_TIMER: UINT = 0x0113;
 const BM_GETCHECK: UINT = 0x00F0;
 const BM_SETCHECK: UINT = 0x00F1;
+const STM_SETICON: UINT = 0x0170;
 const SW_SHOW: i32 = 5;
 const WS_EX_TOPMOST: DWORD = 0x00000008;
 const HTCAPTION: LRESULT = 2;
@@ -53,13 +54,21 @@ const DT_CENTER: u32 = 0x1;
 const DT_VCENTER: u32 = 0x4;
 const DT_SINGLELINE: u32 = 0x20;
 const WH_KEYBOARD_LL: i32 = 13;
+const SS_ICON: DWORD = 0x3;
+const SS_CENTERIMAGE: DWORD = 0x200;
+const SM_CXSCREEN: i32 = 0;
+const SM_CYSCREEN: i32 = 1;
+const PM_REMOVE: UINT = 0x0001;
 
 // 🎨 پالت رنگی
 fn rgb(r: u32, g: u32, b: u32) u32 {
     return r | (g << 8) | (b << 16);
 }
 const COL_BG = rgb(243, 240, 255);
+const COL_SPLASH_BG = rgb(255, 255, 255);
 const COL_TEXT = rgb(70, 40, 160);
+const COL_TITLE = rgb(90, 50, 190);
+const COL_SUB = rgb(120, 100, 160);
 const COL_BTN = rgb(124, 77, 255);
 const COL_OK = rgb(46, 175, 110);
 const COL_LANG = rgb(33, 150, 243);
@@ -67,9 +76,12 @@ const COL_CLOSE = rgb(229, 57, 53);
 const COL_WHITE = rgb(255, 255, 255);
 
 var bg_brush: HBRUSH = null;
+var splash_brush: HBRUSH = null;
+var in_splash: bool = false;
 
 fn ensureBrushes() void {
     if (bg_brush == null) bg_brush = CreateSolidBrush(COL_BG);
+    if (splash_brush == null) splash_brush = CreateSolidBrush(COL_SPLASH_BG);
 }
 
 const PMSG = extern struct {
@@ -111,6 +123,7 @@ extern "user32" fn SendMessageW(hWnd: HWND, Msg: UINT, w: WPARAM, l: LPARAM) cal
 extern "user32" fn SetWindowTextW(hWnd: HWND, s: [*:0]const u16) callconv(windows.WINAPI) BOOL;
 extern "user32" fn GetAsyncKeyState(v: i32) callconv(windows.WINAPI) i16;
 extern "user32" fn GetMessageW(lpMsg: *PMSG, hWnd: ?HWND, a: UINT, b: UINT) callconv(windows.WINAPI) BOOL;
+extern "user32" fn PeekMessageW(lpMsg: *PMSG, hWnd: ?HWND, a: UINT, b: UINT, remove: UINT) callconv(windows.WINAPI) BOOL;
 extern "user32" fn TranslateMessage(m: *const PMSG) callconv(windows.WINAPI) BOOL;
 extern "user32" fn DispatchMessageW(m: *const PMSG) callconv(windows.WINAPI) LRESULT;
 extern "user32" fn FillRect(hdc: HDC, r: *const windows.RECT, b: HBRUSH) callconv(windows.WINAPI) BOOL;
@@ -122,6 +135,8 @@ extern "user32" fn UnhookWindowsHookEx(h: HHOOK) callconv(windows.WINAPI) BOOL;
 extern "user32" fn CallNextHookEx(h: HHOOK, code: i32, wp: WPARAM, lp: LPARAM) callconv(windows.WINAPI) LRESULT;
 extern "user32" fn SetTimer(hWnd: ?HWND, nIDEvent: usize, uElapse: UINT, lpTimerFunc: ?*const fn (?HWND, UINT, usize, DWORD) callconv(windows.WINAPI) void) callconv(windows.WINAPI) usize;
 extern "user32" fn KillTimer(hWnd: ?HWND, uIDEvent: usize) callconv(windows.WINAPI) BOOL;
+extern "user32" fn GetSystemMetrics(i: i32) callconv(windows.WINAPI) i32;
+extern "kernel32" fn Sleep(ms: DWORD) callconv(windows.WINAPI) void;
 extern "gdi32" fn CreateSolidBrush(c: u32) callconv(windows.WINAPI) HBRUSH;
 extern "gdi32" fn CreatePen(style: i32, width: i32, color: u32) callconv(windows.WINAPI) HPEN;
 extern "gdi32" fn CreateRoundRectRgn(l: i32, t: i32, r: i32, b: i32, wr: i32, hr: i32) callconv(windows.WINAPI) HRGN;
@@ -141,6 +156,7 @@ const WNDCLASSEXW = extern struct {
 
 const clsW = std.unicode.utf8ToUtf16LeStringLiteral("LangReplaceSettings");
 const pickClsW = std.unicode.utf8ToUtf16LeStringLiteral("LangReplaceLangPick");
+const splashClsW = std.unicode.utf8ToUtf16LeStringLiteral("LangReplaceSplash");
 const btnClsW = std.unicode.utf8ToUtf16LeStringLiteral("BUTTON");
 const stcClsW = std.unicode.utf8ToUtf16LeStringLiteral("STATIC");
 
@@ -266,15 +282,18 @@ fn colorMessages(Msg: UINT, wParam: WPARAM, lParam: LPARAM) ?LRESULT {
             const hdc: HDC = @ptrFromInt(wParam);
             var r = windows.RECT{ .left = 0, .top = 0, .right = 4000, .bottom = 4000 };
             ensureBrushes();
-            _ = FillRect(hdc, &r, bg_brush);
+            const br = if (in_splash) splash_brush else bg_brush;
+            _ = FillRect(hdc, &r, br);
             return 1;
         },
         WM_CTLCOLORSTATIC => {
             const hdc: HDC = @ptrFromInt(wParam);
-            _ = SetTextColor(hdc, COL_TEXT);
+            const col = if (in_splash) COL_TITLE else COL_TEXT;
+            _ = SetTextColor(hdc, col);
             _ = SetBkMode(hdc, 1);
             ensureBrushes();
-            return @as(LRESULT, @intCast(@intFromPtr(bg_brush)));
+            const br = if (in_splash) splash_brush else bg_brush;
+            return @as(LRESULT, @intCast(@intFromPtr(br)));
         },
         WM_DRAWITEM => {
             const dis: *DRAWITEMSTRUCT = @ptrFromInt(@as(usize, @bitCast(lParam)));
@@ -303,6 +322,80 @@ fn colorMessages(Msg: UINT, wParam: WPARAM, lParam: LPARAM) ?LRESULT {
             return 1;
         },
         else => return null,
+    }
+}
+
+// ===== Splash Screen =====
+fn splashProc(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(windows.WINAPI) LRESULT {
+    if (colorMessages(Msg, wParam, lParam)) |r| return r;
+    return DefWindowProcW(hWnd, Msg, wParam, lParam);
+}
+
+pub fn showSplash(hInst: ?HINSTANCE, icon: ?windows.HICON) void {
+    const allocator = std.heap.page_allocator;
+
+    const wc: WNDCLASSEXW = .{
+        .cbSize = @sizeOf(WNDCLASSEXW), .style = 0, .lpfnWndProc = splashProc,
+        .cbClsExtra = 0, .cbWndExtra = 0, .hInstance = hInst, .hIcon = icon,
+        .hCursor = null, .hbrBackground = null, .lpszMenuName = null,
+        .lpszClassName = splashClsW, .hIconSm = null,
+    };
+    _ = RegisterClassExW(&wc);
+
+    const sw: i32 = 440;
+    const sh: i32 = 260;
+    const screenW = GetSystemMetrics(SM_CXSCREEN);
+    const screenH = GetSystemMetrics(SM_CYSCREEN);
+    const x = (screenW - sw) / 2;
+    const y = (screenH - sh) / 2;
+
+    const titleW = mkWide(allocator, "LangReplace") orelse return;
+    defer allocator.free(titleW);
+
+    const hWnd = CreateWindowExW(
+        WS_EX_TOPMOST, splashClsW, titleW,
+        WS_POPUP, x, y, sw, sh,
+        null, null, hInst, null,
+    ) orelse return;
+
+    roundRgn(hWnd, sw, sh);
+
+    // آیکون (32x32)
+    if (icon) |ic| {
+        const emptyW = mkWide(allocator, "") orelse return;
+        defer allocator.free(emptyW);
+        if (CreateWindowExW(0, stcClsW, emptyW, WS_CHILD | WS_VISIBLE | SS_ICON | SS_CENTERIMAGE, 30, 50, 64, 64, hWnd, null, hInst, null)) |icHwnd| {
+            _ = SendMessageW(icHwnd, STM_SETICON, @intFromPtr(ic), 0);
+        }
+    }
+
+    // Title بزرگ
+    _ = addControl(hWnd, stcClsW, "LangReplace", 0, 110, 50, 300, 50, 0);
+    // Subtitle
+    _ = addControl(hWnd, stcClsW, lang.t("Keyboard Layout Converter", "ابزار تبدیل چیدمان کیبورد"), 0, 110, 105, 300, 24, 0);
+    // Version
+    _ = addControl(hWnd, stcClsW, "v1.0", 0, 110, 135, 300, 20, 0);
+
+    // خط جداکننده
+    // (با STATIC ساده نمی‌شه، فعلاً رد می‌کنیم)
+
+    // Programmer footer
+    _ = addControl(hWnd, stcClsW, lang.t("Programmer: Nikan Rayan 💜", "برنامه‌نویس: نیکان رایان 💜"), 0, 30, 210, 380, 24, 0);
+
+    in_splash = true;
+    _ = ShowWindow(hWnd, SW_SHOW);
+    _ = UpdateWindow(hWnd);
+
+    Sleep(3000);
+
+    in_splash = false;
+    _ = DestroyWindow(hWnd);
+
+    // پاک‌سازی صف پیام
+    var msg: PMSG = undefined;
+    while (PeekMessageW(&msg, null, 0, 0, PM_REMOVE) != 0) {
+        _ = TranslateMessage(&msg);
+        _ = DispatchMessageW(&msg);
     }
 }
 
@@ -462,7 +555,6 @@ pub fn openSettings(hInst: ?HINSTANCE, parent: ?HWND) void {
         if (chk_hwnds[3]) |h| _ = SendMessageW(h, BM_SETCHECK, 1, 0);
     }
 
-    // ✅ برچسب F6 اصلاح شد: معکوس کردن متن
     const names = [_][]const u8{
         lang.t("Convert  abc <-> FA", "تبدیل  abc <-> فارسی"),
         lang.t("Reverse text (abc->cba)", "معکوس متن (سلام -> مالس)"),
